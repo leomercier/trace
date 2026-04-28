@@ -35,9 +35,16 @@ export default async function EditorPage({
     .maybeSingle();
   if (!mem) notFound();
 
-  const [{ data: measurements }, { data: notes }] = await Promise.all([
+  const [{ data: project }, { data: measurements }, { data: notes }, { data: pages }] = await Promise.all([
+    supabase.from("projects").select("name").eq("id", params.projectId).maybeSingle(),
     supabase.from("measurements").select("*").eq("page_id", page.id),
     supabase.from("notes").select("*").eq("page_id", page.id),
+    supabase
+      .from("pages")
+      .select("id, name")
+      .eq("project_id", params.projectId)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true }),
   ]);
 
   let signedUrl: string | null = null;
@@ -68,7 +75,10 @@ export default async function EditorPage({
           avatar: profile?.avatar_url || null,
         },
         orgId: org.id,
+        orgSlug: params.orgSlug,
         projectId: params.projectId,
+        projectName: project?.name || "",
+        pages: (pages || []) as any,
         signedUrl,
       }}
     />

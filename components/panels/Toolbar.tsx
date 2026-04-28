@@ -20,7 +20,16 @@ export function Toolbar() {
   const items = TOOLS.filter((t) => canEdit || t.viewerOk);
 
   return (
-    <div className="pointer-events-auto fixed left-1/2 top-16 z-20 -translate-x-1/2 rounded-md border border-border bg-panel p-1 shadow-md md:left-4 md:top-20 md:translate-x-0">
+    <div
+      className={cn(
+        "pointer-events-auto fixed z-20 rounded-md border border-border bg-panel p-1 shadow-md",
+        // Mobile: bottom-center, above the bottom sheet
+        "left-1/2 -translate-x-1/2 bottom-20",
+        // Desktop: top-left
+        "md:left-4 md:top-20 md:bottom-auto md:translate-x-0",
+      )}
+      style={{ marginBottom: "env(safe-area-inset-bottom)" }}
+    >
       <div className="flex gap-1">
         {items.map((t) => (
           <button
@@ -28,11 +37,12 @@ export function Toolbar() {
             title={`${t.label} (${t.key})`}
             onClick={() => setTool(t.id)}
             className={cn(
-              "flex h-9 w-9 items-center justify-center rounded text-ink-muted hover:bg-panel-muted hover:text-ink",
+              "flex h-11 w-11 items-center justify-center rounded text-ink-muted hover:bg-panel-muted hover:text-ink md:h-9 md:w-9",
               tool === t.id && "bg-ink text-white hover:bg-ink hover:text-white",
             )}
           >
-            <t.icon size={16} />
+            <t.icon size={18} className="md:hidden" />
+            <t.icon size={16} className="hidden md:block" />
           </button>
         ))}
       </div>

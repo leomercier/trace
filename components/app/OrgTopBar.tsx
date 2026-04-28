@@ -6,22 +6,30 @@ import { useState } from "react";
 import { ChevronDown, LogOut, Settings } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { createClient } from "@/lib/supabase/client";
+import { cn } from "@/lib/utils/cn";
 
 export function OrgTopBar({
   org,
   role,
   user,
+  hideOnMobile,
 }: {
   org: { id: string; name: string; slug: string };
   role: "owner" | "admin" | "editor" | "viewer";
   user: { id: string; email: string; name: string; avatar_url: string | null };
+  hideOnMobile?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const supabase = createClient();
   const router = useRouter();
 
   return (
-    <header className="sticky top-0 z-30 border-b border-border bg-bg/80 backdrop-blur">
+    <header
+      className={cn(
+        "sticky top-0 z-30 border-b border-border bg-bg/80 backdrop-blur",
+        hideOnMobile && "hidden md:block",
+      )}
+    >
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
         <div className="flex items-center gap-3">
           <Link href="/app" className="font-serif text-xl">

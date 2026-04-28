@@ -56,6 +56,12 @@ button {
   height: 100%;
 }
 
+/* Inside the editor route, suppress the org-level mobile bar — the editor
+   provides its own with hamburger + page name. */
+body.trace-in-editor .org-mobile-bar {
+  display: none !important;
+}
+
 /* Hide focus rings on mouse but keep for keyboard */
 :focus:not(:focus-visible) {
   outline: none;

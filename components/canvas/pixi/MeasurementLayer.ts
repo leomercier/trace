@@ -54,9 +54,12 @@ export class MeasurementLayer extends PIXI.Container {
         .circle(ax, ay, px(ENDPOINT_R_PX))
         .circle(bx, by, px(ENDPOINT_R_PX));
 
-      // label
+      // label — show "Name · 1.20 m" when named, otherwise just the length
       const len = Math.hypot(bx - ax, by - ay);
-      const label = m.label || (scale ? formatLength(len * scale.realPerUnit, scale.unit) : `${len.toFixed(2)} u`);
+      const lenStr = scale
+        ? formatLength(len * scale.realPerUnit, scale.unit)
+        : `${len.toFixed(2)} u`;
+      const label = m.label ? `${m.label} · ${lenStr}` : lenStr;
       const mx = (ax + bx) / 2;
       const my = (ay + by) / 2;
       const txt = new PIXI.Text({

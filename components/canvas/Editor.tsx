@@ -15,6 +15,7 @@ import { Upload, Download, Maximize2, Share2 } from "lucide-react";
 import { ShareDialog } from "@/components/panels/ShareDialog";
 import { MobileSheet } from "@/components/panels/MobileSheet";
 import { AttachmentsPanel } from "@/components/panels/AttachmentsPanel";
+import { EditorMobileBar } from "@/components/panels/EditorMobileBar";
 import { idbCacheGet, idbCacheSet, hashBlob } from "@/lib/utils/idb";
 import { subscribePage, broadcastCursor, broadcastDraft } from "@/lib/realtime/page";
 import { Avatar, stringToColor } from "@/components/ui/Avatar";
@@ -27,7 +28,10 @@ interface InitialData {
   role: "owner" | "admin" | "editor" | "viewer";
   user: { id: string; name: string; email: string; avatar: string | null };
   orgId: string;
+  orgSlug: string;
   projectId: string;
+  projectName: string;
+  pages: { id: string; name: string }[];
   signedUrl: string | null;
 }
 
@@ -43,9 +47,17 @@ export function Editor({ initial }: { initial: InitialData }) {
     by: number;
   } | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  const [dwgConverting, setDwgConverting] = useState(false);
   const [presence, setPresence] = useState<
     { userId: string; name: string; color: string }[]
   >([]);
+
+  // mark <body> so the org-level mobile bar can hide itself while we're in
+  // the editor (the editor renders its own mobile bar).
+  useEffect(() => {
+    document.body.classList.add("trace-in-editor");
+    return () => document.body.classList.remove("trace-in-editor");
+  }, []);
 
   // boot store
   useEffect(() => {
@@ -269,6 +281,12 @@ export function Editor({ initial }: { initial: InitialData }) {
     await supabase.from("measurements").delete().eq("id", id);
   }
 
+  async function renameMeasurement(id: string, label: string | null) {
+    const m = useEditor.getState().measurements[id];
+    if (m) useEditor.getState().upsertMeasurement({ ...m, label });
+    await supabase.from("measurements").update({ label }).eq("id", id);
+  }
+
   async function createNote(p: { x: number; y: number }) {
     const optimisticId = `tmp-${crypto.randomUUID()}`;
     const optimistic: Note = {
@@ -325,8 +343,36 @@ export function Editor({ initial }: { initial: InitialData }) {
   }
 
   async function onUploadFile(file: File) {
-    const path = `${initial.orgId}/${initial.projectId}/${initial.page.id}/${file.name}`;
-    const { error } = await supabase.storage.from("drawings").upload(path, file, {
+    let blob: Blob = file;
+    let fileName = file.name;
+    let detected = inferFileType(file.name);
+
+    // Convert DWG → DXF in the browser at upload time. The DXF is what gets
+    // persisted; the original DWG is never stored. From the page's
+    // perspective the source is now a DXF, and the existing parser path
+    // takes over for rendering.
+    if (detected === "dwg") {
+      setDwgConverting(true);
+      try {
+        const { convertDwgToDxf } = await import("@/lib/utils/dwg");
+        const dxf = await convertDwgToDxf(file);
+        if (!dxf) {
+          alert(
+            "Could not convert this DWG. Try saving it as DXF in your CAD app and dropping that instead.",
+          );
+          setDwgConverting(false);
+          return;
+        }
+        blob = dxf;
+        fileName = file.name.replace(/\.dwg$/i, "") + ".dxf";
+        detected = "dxf";
+      } finally {
+        setDwgConverting(false);
+      }
+    }
+
+    const path = `${initial.orgId}/${initial.projectId}/${initial.page.id}/${fileName}`;
+    const { error } = await supabase.storage.from("drawings").upload(path, blob, {
       upsert: true,
       cacheControl: "3600",
     });
@@ -334,14 +380,13 @@ export function Editor({ initial }: { initial: InitialData }) {
       alert("Upload failed: " + error.message);
       return;
     }
-    const type = inferFileType(file.name);
     await supabase
       .from("pages")
       .update({
         source_storage_path: path,
-        source_file_type: type,
-        source_file_name: file.name,
-        source_file_size: file.size,
+        source_file_type: detected,
+        source_file_name: fileName,
+        source_file_size: blob.size,
       })
       .eq("id", initial.page.id);
     window.location.reload();
@@ -363,7 +408,18 @@ export function Editor({ initial }: { initial: InitialData }) {
   }
 
   return (
-    <div className="flex h-[calc(100vh-57px)] w-full">
+    <div className="flex h-screen w-full flex-col md:h-[calc(100vh-57px)] md:flex-row">
+      <EditorMobileBar
+        orgSlug={initial.orgSlug}
+        projectId={initial.projectId}
+        projectName={initial.projectName}
+        currentPageId={initial.page.id}
+        currentPageName={initial.page.name}
+        pages={initial.pages}
+        canEdit={initial.role !== "viewer"}
+        canAdmin={initial.role === "owner" || initial.role === "admin"}
+        onShare={() => setShareOpen(true)}
+      />
       <div className="relative min-w-0 flex-1">
         <Canvas
           onPointerWorld={onPointerWorld}
@@ -416,8 +472,18 @@ export function Editor({ initial }: { initial: InitialData }) {
           </div>
         </div>
 
-        {!initial.signedUrl && initial.role !== "viewer" ? (
+        {!initial.signedUrl && initial.role !== "viewer" && !dwgConverting ? (
           <FileDropzone onUpload={onUploadFile} />
+        ) : null}
+
+        {dwgConverting ? (
+          <div className="pointer-events-auto absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-canvas/90 backdrop-blur-sm">
+            <div className="size-10 animate-spin rounded-full border-2 border-ink border-r-transparent" />
+            <div className="font-serif text-2xl text-ink">Converting DWG…</div>
+            <div className="text-sm text-ink-muted">
+              First-time conversion downloads a 24MB engine. Subsequent uploads are instant.
+            </div>
+          </div>
         ) : null}
 
         <AttachmentsPanel
@@ -453,6 +519,8 @@ export function Editor({ initial }: { initial: InitialData }) {
       <Inspector
         pageName={initial.page.name}
         onRename={renamePage}
+        onRenameMeasurement={renameMeasurement}
+        onDeleteMeasurement={deleteMeasurement}
         onDeleteSelection={() => {
           const sel = useEditor.getState().selection;
           if (sel?.kind === "measurement") deleteMeasurement(sel.id);
