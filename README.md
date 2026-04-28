@@ -63,10 +63,22 @@ All variables and what they do:
    - Google: Authentication → Providers → Google. Add the OAuth client ID/secret
      from Google Cloud Console. The redirect URI is
      `https://YOUR-PROJECT.supabase.co/auth/v1/callback`.
-5. **Site URL & redirect URLs** (Authentication → URL Configuration):
-   - Site URL: `https://your-domain.com` (or `http://localhost:3000` in dev)
-   - Additional redirect URLs: `https://your-domain.com/auth/callback`,
-     `http://localhost:3000/auth/callback`
+5. **Site URL & redirect URLs** (Authentication → URL Configuration). This
+   step is critical — get it wrong and your magic-link emails will contain
+   `http://localhost:3000` URLs that don't work for users:
+   - **Site URL**: set this to your **production URL** (e.g.
+     `https://trace.vercel.app`), not localhost. Supabase uses this as the
+     fallback whenever the `emailRedirectTo` we pass isn't in the allow-list
+     below, so a wrong value here silently breaks signup emails.
+   - **Additional Redirect URLs** — add ALL of these so the dev and prod flows
+     both work:
+     - `https://your-production-domain.com/auth/callback`
+     - `https://*-your-vercel-team.vercel.app/auth/callback` (preview deploys)
+     - `http://localhost:3000/auth/callback` (local dev)
+6. **Email templates** (Authentication → Email Templates). Confirm the magic
+   link template uses `{{ .ConfirmationURL }}` (the default does). If you
+   customised it to use `{{ .SiteURL }}`, links will only ever go to the Site
+   URL above.
 
 ### Vercel
 

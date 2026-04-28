@@ -31,12 +31,14 @@ export function SignupForm() {
   }
 
   const next = "/app";
-  const redirectTo =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}${
-          inviteToken ? `&invite=${encodeURIComponent(inviteToken)}` : ""
-        }`
-      : undefined;
+  const origin =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    (typeof window !== "undefined" ? window.location.origin : "");
+  const redirectTo = origin
+    ? `${origin}/auth/callback?next=${encodeURIComponent(next)}${
+        inviteToken ? `&invite=${encodeURIComponent(inviteToken)}` : ""
+      }`
+    : undefined;
 
   async function onMagicLink(e: React.FormEvent) {
     e.preventDefault();
