@@ -29,9 +29,10 @@ export async function GET(
       .eq("id", share.page_id!)
       .single();
     if (!page) return NextResponse.json({ error: "missing" }, { status: 404 });
-    const [{ data: measurements }, { data: notes }] = await Promise.all([
+    const [{ data: measurements }, { data: notes }, { data: placedItems }] = await Promise.all([
       svc.from("measurements").select("*").eq("page_id", page.id),
       svc.from("notes").select("*").eq("page_id", page.id),
+      svc.from("placed_items").select("*").eq("page_id", page.id),
     ]);
     let signedUrl: string | null = null;
     if (page.source_storage_path) {
@@ -45,6 +46,7 @@ export async function GET(
       page,
       measurements: measurements || [],
       notes: notes || [],
+      placedItems: placedItems || [],
       signedUrl,
       allow_comments: share.allow_comments,
     });

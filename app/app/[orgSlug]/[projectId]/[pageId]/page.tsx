@@ -35,10 +35,22 @@ export default async function EditorPage({
     .maybeSingle();
   if (!mem) notFound();
 
-  const [{ data: project }, { data: measurements }, { data: notes }, { data: pages }] = await Promise.all([
+  const [
+    { data: project },
+    { data: measurements },
+    { data: notes },
+    { data: placedItems },
+    { data: pages },
+  ] = await Promise.all([
     supabase.from("projects").select("name").eq("id", params.projectId).maybeSingle(),
     supabase.from("measurements").select("*").eq("page_id", page.id),
     supabase.from("notes").select("*").eq("page_id", page.id),
+    supabase
+      .from("placed_items")
+      .select("*")
+      .eq("page_id", page.id)
+      .order("z_order", { ascending: true })
+      .order("created_at", { ascending: true }),
     supabase
       .from("pages")
       .select("id, name")
@@ -67,6 +79,7 @@ export default async function EditorPage({
         page: page as any,
         measurements: (measurements || []) as any,
         notes: (notes || []) as any,
+        placedItems: (placedItems || []) as any,
         role: mem.role as any,
         user: {
           id: u.user!.id,

@@ -110,6 +110,60 @@ export interface Attachment {
   uploaded_at: string;
 }
 
+export interface InventoryItem {
+  id: string;
+  organisation_id: string | null;
+  source: "default" | "ai" | "manual";
+  name: string;
+  category: string | null;
+  brand: string | null;
+  price_text: string | null;
+  width_mm: number;
+  depth_mm: number;
+  height_mm: number;
+  svg_markup: string;
+  thumbnail_url: string | null;
+  source_url: string | null;
+  query: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface PlacedItem {
+  id: string;
+  page_id: string;
+  inventory_item_id: string | null;
+  name: string;
+  brand: string | null;
+  svg_markup: string;
+  width_mm: number;
+  depth_mm: number;
+  height_mm: number;
+  x: number;
+  y: number;
+  rotation: number;
+  scale_w: number;
+  scale_d: number;
+  z_order: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Comment {
+  id: string;
+  page_id: string;
+  parent_id: string | null;
+  x: number;
+  y: number;
+  text: string;
+  resolved: boolean;
+  author_id: string | null;
+  author_name: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PublicShare {
   id: string;
   scope: ShareScope;

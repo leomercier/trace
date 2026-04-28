@@ -108,6 +108,18 @@ All variables and what they do:
 4. Once deployed, update `NEXT_PUBLIC_APP_URL` to the production URL and the
    Supabase redirect URLs to include the production `/auth/callback`.
 
+### Anthropic (optional but recommended)
+
+The AI assistant and AI product search are powered by Claude. Without
+`ANTHROPIC_API_KEY` the app still works — those two features just return a
+503 with a clear message.
+
+1. Create an Anthropic console account, generate an API key.
+2. Add it to Vercel as `ANTHROPIC_API_KEY` (sensitive). Optionally set
+   `ANTHROPIC_MODEL` (defaults to `claude-sonnet-4-5`).
+3. **Run `supabase/seed.sql`** after the migrations to populate the default
+   furniture/fixtures library — it's the inventory the user sees by default.
+
 ### Resend (optional)
 
 1. Create a Resend account, verify your sending domain.

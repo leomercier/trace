@@ -7,6 +7,7 @@ import { Viewport } from "./pixi/Viewport";
 import { DrawingLayer } from "./pixi/DrawingLayer";
 import { MeasurementLayer } from "./pixi/MeasurementLayer";
 import { CursorLayer } from "./pixi/CursorLayer";
+import { PlacedItemsLayer } from "./pixi/PlacedItemsLayer";
 import { SnapIndex } from "./pixi/Snapping";
 
 export interface CanvasHandle {
@@ -18,11 +19,19 @@ export function Canvas({
   onClickWorld,
   onSelectionPick,
   onCanvasReady,
+  onItemMove,
+  onItemResize,
+  onItemRotate,
+  onItemMoveEnd,
 }: {
   onPointerWorld?: (p: { x: number; y: number; snapped: boolean }) => void;
   onClickWorld?: (p: { x: number; y: number; snapped: boolean }) => void;
-  onSelectionPick?: (id: string | null) => void;
+  onSelectionPick?: (sel: { kind: "measurement" | "placed"; id: string } | null) => void;
   onCanvasReady?: (api: CanvasHandle) => void;
+  onItemMove?: (id: string, x: number, y: number) => void;
+  onItemResize?: (id: string, scaleW: number, scaleD: number) => void;
+  onItemRotate?: (id: string, rotation: number) => void;
+  onItemMoveEnd?: (id: string) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<{
@@ -30,6 +39,7 @@ export function Canvas({
     viewport: Viewport;
     drawingLayer: DrawingLayer;
     measureLayer: MeasurementLayer;
+    placedLayer: PlacedItemsLayer;
     cursorLayer: CursorLayer;
     snapBadge: PIXI.Graphics;
     snap: SnapIndex;
@@ -62,9 +72,11 @@ export function Canvas({
       viewport.setSize(rect.width, rect.height);
 
       const drawingLayer = new DrawingLayer();
+      const placedLayer = new PlacedItemsLayer(viewport);
       const measureLayer = new MeasurementLayer(viewport);
       const cursorLayer = new CursorLayer(viewport);
       viewport.world.addChild(drawingLayer);
+      viewport.world.addChild(placedLayer);
       viewport.world.addChild(measureLayer);
       viewport.world.addChild(cursorLayer);
 
@@ -76,6 +88,7 @@ export function Canvas({
         app,
         viewport,
         drawingLayer,
+        placedLayer,
         measureLayer,
         cursorLayer,
         snapBadge,
@@ -143,19 +156,33 @@ export function Canvas({
           state.scale,
         );
       }
+      if (
+        state.placedItems !== prev.placedItems ||
+        state.scale !== prev.scale ||
+        state.selection !== prev.selection
+      ) {
+        a.placedLayer.render(
+          Object.values(state.placedItems),
+          state.selection?.kind === "placed" ? state.selection.id : null,
+          state.scale?.realPerUnit ?? null,
+        );
+      }
       if (state.draft !== prev.draft) {
         a.measureLayer.drawDraft(state.draft?.start || null, state.draft?.end || null);
       }
       if (state.cursors !== prev.cursors) {
-        // Filter own cursor out
         a.cursorLayer.render(Object.values(state.cursors));
       }
       if (state.view !== prev.view) {
-        // Re-render to update counter-scale
         a.measureLayer.render(
           Object.values(state.measurements),
           state.selection?.kind === "measurement" ? state.selection.id : null,
           state.scale,
+        );
+        a.placedLayer.render(
+          Object.values(state.placedItems),
+          state.selection?.kind === "placed" ? state.selection.id : null,
+          state.scale?.realPerUnit ?? null,
         );
         a.measureLayer.drawDraft(state.draft?.start || null, state.draft?.end || null);
         a.cursorLayer.render(Object.values(state.cursors));
@@ -190,6 +217,14 @@ export function Canvas({
     let pointerDownAt = 0;
     let pointerDownX = 0;
     let pointerDownY = 0;
+    let itemDrag:
+      | {
+          mode: "move" | "resize" | "rotate";
+          id: string;
+          startWorld: { x: number; y: number };
+          itemStart: { x: number; y: number; scale_w: number; scale_d: number; rotation: number; w_mm: number; d_mm: number };
+        }
+      | null = null;
     const PAN_TOOLS = new Set(["pan"]);
 
     const SNAP_PX = 8;
@@ -233,9 +268,66 @@ export function Canvas({
       pointerDownY = sy;
       const tool = useEditor.getState().tool;
       const isPan =
-        e.button === 1 || // middle mouse
+        e.button === 1 ||
         (e.pointerType === "mouse" && e.shiftKey) ||
         PAN_TOOLS.has(tool);
+
+      // If select tool + a placed item is selected, check for handle/item drag.
+      if (!isPan && tool === "select" && e.button === 0) {
+        const state = useEditor.getState();
+        const world = a!.viewport.screenToWorld(sx, sy);
+        const items = Object.values(state.placedItems);
+        const realPerUnit = state.scale?.realPerUnit ?? null;
+
+        // Selected item handle hit test
+        if (state.selection?.kind === "placed") {
+          const sel = state.placedItems[state.selection.id];
+          if (sel) {
+            const handle = a!.placedLayer.hitHandle(sel, world.x, world.y, realPerUnit);
+            if (handle) {
+              itemDrag = {
+                mode: handle,
+                id: sel.id,
+                startWorld: world,
+                itemStart: {
+                  x: Number(sel.x),
+                  y: Number(sel.y),
+                  scale_w: Number(sel.scale_w) || 1,
+                  scale_d: Number(sel.scale_d) || 1,
+                  rotation: Number(sel.rotation) || 0,
+                  w_mm: sel.width_mm,
+                  d_mm: sel.depth_mm,
+                },
+              };
+              canvas.setPointerCapture(e.pointerId);
+              return;
+            }
+          }
+        }
+        // Plain click on an item → start move drag
+        const hit = a!.placedLayer.hitTest(items, world.x, world.y, realPerUnit);
+        if (hit) {
+          const item = state.placedItems[hit];
+          onSelectionPick?.({ kind: "placed", id: hit });
+          itemDrag = {
+            mode: "move",
+            id: hit,
+            startWorld: world,
+            itemStart: {
+              x: Number(item.x),
+              y: Number(item.y),
+              scale_w: Number(item.scale_w) || 1,
+              scale_d: Number(item.scale_d) || 1,
+              rotation: Number(item.rotation) || 0,
+              w_mm: item.width_mm,
+              d_mm: item.depth_mm,
+            },
+          };
+          canvas.setPointerCapture(e.pointerId);
+          return;
+        }
+      }
+
       if (isPan || (tool === "select" && e.button === 0)) {
         dragging = isPan;
         lastX = sx;
@@ -248,6 +340,39 @@ export function Canvas({
       const rect = canvas.getBoundingClientRect();
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
+
+      if (itemDrag) {
+        const world = a!.viewport.screenToWorld(sx, sy);
+        const dx = world.x - itemDrag.startWorld.x;
+        const dy = world.y - itemDrag.startWorld.y;
+        if (itemDrag.mode === "move") {
+          onItemMove?.(itemDrag.id, itemDrag.itemStart.x + dx, itemDrag.itemStart.y + dy);
+        } else if (itemDrag.mode === "resize") {
+          // Convert drag in world space into the item's local frame.
+          const r = (itemDrag.itemStart.rotation * Math.PI) / 180;
+          const lx = dx * Math.cos(-r) - dy * Math.sin(-r);
+          const ly = dx * Math.sin(-r) + dy * Math.cos(-r);
+          const realPerUnit = useEditor.getState().scale?.realPerUnit ?? 1;
+          const baseW = itemDrag.itemStart.w_mm / realPerUnit;
+          const baseD = itemDrag.itemStart.d_mm / realPerUnit;
+          // Resize by enlarging both edges symmetrically about centre.
+          const newSW = Math.max(0.1, itemDrag.itemStart.scale_w + (lx * 2) / baseW);
+          const newSD = Math.max(0.1, itemDrag.itemStart.scale_d + (ly * 2) / baseD);
+          const aspectLock = e.shiftKey;
+          const sW = aspectLock ? Math.max(newSW, newSD) : newSW;
+          const sD = aspectLock ? Math.max(newSW, newSD) : newSD;
+          onItemResize?.(itemDrag.id, sW, sD);
+        } else if (itemDrag.mode === "rotate") {
+          const cx = itemDrag.itemStart.x;
+          const cy = itemDrag.itemStart.y;
+          const angleNow = Math.atan2(world.y - cy, world.x - cx);
+          // Top of item is at angle = -PI/2 in canvas terms.
+          let degrees = ((angleNow + Math.PI / 2) * 180) / Math.PI;
+          if (e.shiftKey) degrees = Math.round(degrees / 15) * 15;
+          onItemRotate?.(itemDrag.id, degrees);
+        }
+        return;
+      }
 
       if (dragging) {
         a!.viewport.pan(sx - lastX, sy - lastY);
@@ -272,8 +397,15 @@ export function Canvas({
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
       const wasDragging = dragging;
+      const wasItemDrag = itemDrag;
       dragging = false;
+      itemDrag = null;
       try { canvas.releasePointerCapture(e.pointerId); } catch {}
+
+      if (wasItemDrag) {
+        onItemMoveEnd?.(wasItemDrag.id);
+        return;
+      }
 
       const dt = Date.now() - pointerDownAt;
       const moved = Math.hypot(sx - pointerDownX, sy - pointerDownY);
@@ -284,8 +416,16 @@ export function Canvas({
       const snapped = snapToVertex(world);
       const tool = useEditor.getState().tool;
       if (tool === "select") {
-        const id = pickMeasurement(world);
-        onSelectionPick?.(id);
+        const state = useEditor.getState();
+        const items = Object.values(state.placedItems);
+        const realPerUnit = state.scale?.realPerUnit ?? null;
+        const itemHit = a!.placedLayer.hitTest(items, world.x, world.y, realPerUnit);
+        if (itemHit) {
+          onSelectionPick?.({ kind: "placed", id: itemHit });
+          return;
+        }
+        const mid = pickMeasurement(world);
+        onSelectionPick?.(mid ? { kind: "measurement", id: mid } : null);
       } else {
         onClickWorld?.(snapped);
       }

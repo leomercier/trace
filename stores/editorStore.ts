@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { Measurement, Note } from "@/lib/supabase/types";
+import type { Measurement, Note, PlacedItem } from "@/lib/supabase/types";
 import type { Bounds, Pt } from "@/lib/utils/geometry";
 import type { Unit } from "@/lib/utils/units";
 
@@ -29,11 +29,12 @@ export interface EditorState {
   // tools
   tool: Tool;
   draft: { tool: Tool; start: Pt; end: Pt } | null;
-  selection: { kind: "measurement" | "note"; id: string } | null;
+  selection: { kind: "measurement" | "note" | "placed"; id: string } | null;
 
   // data
   measurements: Record<string, Measurement>;
   notes: Record<string, Note>;
+  placedItems: Record<string, PlacedItem>;
   scale: { realPerUnit: number; unit: Unit } | null;
   bounds: Bounds | null;
 
@@ -41,7 +42,7 @@ export interface EditorState {
   cursors: Record<string, RemoteCursor>;
 
   // layers
-  layers: { measurements: boolean; notes: boolean; cursors: boolean };
+  layers: { measurements: boolean; notes: boolean; cursors: boolean; items: boolean };
 
   // drawing entities (parsed from source file). Live in memory only.
   entities: ParsedEntity[];
@@ -53,6 +54,7 @@ export interface EditorState {
     role: Role;
     measurements: Measurement[];
     notes: Note[];
+    placedItems: PlacedItem[];
     scale: { realPerUnit: number; unit: Unit } | null;
     bounds: Bounds | null;
   }) => void;
@@ -64,6 +66,8 @@ export interface EditorState {
   removeMeasurement: (id: string) => void;
   upsertNote: (n: Note) => void;
   removeNote: (id: string) => void;
+  upsertPlacedItem: (p: PlacedItem) => void;
+  removePlacedItem: (id: string) => void;
   setScale: (realPerUnit: number, unit: Unit) => void;
   setBounds: (b: Bounds) => void;
   setEntities: (entities: ParsedEntity[]) => void;
@@ -90,20 +94,22 @@ export const useEditor = create<EditorState>((set) => ({
   selection: null,
   measurements: {},
   notes: {},
+  placedItems: {},
   scale: null,
   bounds: null,
   cursors: {},
-  layers: { measurements: true, notes: true, cursors: true },
+  layers: { measurements: true, notes: true, cursors: true, items: true },
   entities: [],
   entitiesLoaded: false,
 
-  init: ({ pageId, role, measurements, notes, scale, bounds }) =>
+  init: ({ pageId, role, measurements, notes, placedItems, scale, bounds }) =>
     set(() => ({
       pageId,
       role,
       canEdit: role !== "viewer",
       measurements: Object.fromEntries(measurements.map((m) => [m.id, m])),
       notes: Object.fromEntries(notes.map((n) => [n.id, n])),
+      placedItems: Object.fromEntries(placedItems.map((p) => [p.id, p])),
       scale,
       bounds,
       tool: role !== "viewer" ? "measure" : "pan",
@@ -127,6 +133,13 @@ export const useEditor = create<EditorState>((set) => ({
     set((s) => {
       const { [id]: _, ...rest } = s.notes;
       return { notes: rest };
+    }),
+  upsertPlacedItem: (p) =>
+    set((s) => ({ placedItems: { ...s.placedItems, [p.id]: p } })),
+  removePlacedItem: (id) =>
+    set((s) => {
+      const { [id]: _, ...rest } = s.placedItems;
+      return { placedItems: rest };
     }),
   setScale: (realPerUnit, unit) => set({ scale: { realPerUnit, unit } }),
   setBounds: (b) => set({ bounds: b }),

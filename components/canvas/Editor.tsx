@@ -7,15 +7,17 @@ import { Toolbar } from "@/components/panels/Toolbar";
 import { Inspector } from "@/components/panels/Inspector";
 import { CalibrateDialog } from "@/components/panels/CalibrateDialog";
 import { useEditor, type Tool } from "@/stores/editorStore";
-import type { Measurement, Note, Page } from "@/lib/supabase/types";
+import type { InventoryItem, Measurement, Note, Page, PlacedItem } from "@/lib/supabase/types";
 import { createClient } from "@/lib/supabase/client";
 import { parseFile, inferFileType } from "./parsers";
 import { Button } from "@/components/ui/Button";
-import { Upload, Download, Maximize2, Share2 } from "lucide-react";
+import { Upload, Download, Maximize2, Share2, Package, Sparkles } from "lucide-react";
 import { ShareDialog } from "@/components/panels/ShareDialog";
 import { MobileSheet } from "@/components/panels/MobileSheet";
 import { AttachmentsPanel } from "@/components/panels/AttachmentsPanel";
 import { EditorMobileBar } from "@/components/panels/EditorMobileBar";
+import { InventoryDrawer } from "@/components/inventory/InventoryDrawer";
+import { AssistantDrawer } from "@/components/assistant/AssistantDrawer";
 import { idbCacheGet, idbCacheSet, hashBlob } from "@/lib/utils/idb";
 import { subscribePage, broadcastCursor, broadcastDraft } from "@/lib/realtime/page";
 import { Avatar, stringToColor } from "@/components/ui/Avatar";
@@ -25,6 +27,7 @@ interface InitialData {
   page: Page;
   measurements: Measurement[];
   notes: Note[];
+  placedItems: PlacedItem[];
   role: "owner" | "admin" | "editor" | "viewer";
   user: { id: string; name: string; email: string; avatar: string | null };
   orgId: string;
@@ -47,7 +50,10 @@ export function Editor({ initial }: { initial: InitialData }) {
     by: number;
   } | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  const [inventoryOpen, setInventoryOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [dwgConverting, setDwgConverting] = useState(false);
+  const [draggingItem, setDraggingItem] = useState<InventoryItem | null>(null);
   const [presence, setPresence] = useState<
     { userId: string; name: string; color: string }[]
   >([]);
@@ -66,6 +72,7 @@ export function Editor({ initial }: { initial: InitialData }) {
       role: initial.role,
       measurements: initial.measurements,
       notes: initial.notes,
+      placedItems: initial.placedItems,
       scale:
         initial.page.scale_real_per_unit
           ? {
@@ -128,6 +135,11 @@ export function Editor({ initial }: { initial: InitialData }) {
         if (kind === "DELETE") s.removeNote(n.id);
         else s.upsertNote(n);
       },
+      onPlacedItem: (p, kind) => {
+        const s = useEditor.getState();
+        if (kind === "DELETE") s.removePlacedItem(p.id);
+        else s.upsertPlacedItem(p);
+      },
       onPageUpdate: (p) => {
         const s = useEditor.getState();
         if (p.scale_real_per_unit) s.setScale(+p.scale_real_per_unit, (p.scale_unit || "mm") as any);
@@ -171,13 +183,22 @@ export function Editor({ initial }: { initial: InitialData }) {
         useEditor.getState().setDraft(null);
         useEditor.getState().setSelection(null);
       }
-      if ((e.key === "Delete" || e.key === "Backspace")) {
+      if (e.key === "Delete" || e.key === "Backspace") {
         const sel = useEditor.getState().selection;
         if (sel && useEditor.getState().canEdit) {
           if (sel.kind === "measurement") deleteMeasurement(sel.id);
           if (sel.kind === "note") deleteNote(sel.id);
+          if (sel.kind === "placed") deletePlacedItem(sel.id);
           useEditor.getState().setSelection(null);
         }
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "i") {
+        e.preventDefault();
+        setInventoryOpen(true);
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setAssistantOpen(true);
       }
       if (e.key === "f" || e.key === "F") {
         canvasApi.current?.fitToContent();
@@ -338,8 +359,110 @@ export function Editor({ initial }: { initial: InitialData }) {
     setCalibratePending(null);
   }
 
-  function onSelectionPick(id: string | null) {
-    useEditor.getState().setSelection(id ? { kind: "measurement", id } : null);
+  function onSelectionPick(sel: { kind: "measurement" | "placed"; id: string } | null) {
+    useEditor.getState().setSelection(sel);
+  }
+
+  // ============= Placed items =============
+
+  async function placeItem(inv: InventoryItem, world: { x: number; y: number }) {
+    if (initial.role === "viewer") return;
+    const optimisticId = `tmp-${crypto.randomUUID()}`;
+    const optimistic: PlacedItem = {
+      id: optimisticId,
+      page_id: initial.page.id,
+      inventory_item_id: inv.id,
+      name: inv.name,
+      brand: inv.brand,
+      svg_markup: inv.svg_markup,
+      width_mm: inv.width_mm,
+      depth_mm: inv.depth_mm,
+      height_mm: inv.height_mm,
+      x: world.x as any,
+      y: world.y as any,
+      rotation: 0 as any,
+      scale_w: 1 as any,
+      scale_d: 1 as any,
+      z_order: 0,
+      created_by: initial.user.id,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    useEditor.getState().upsertPlacedItem(optimistic);
+    useEditor.getState().setSelection({ kind: "placed", id: optimisticId });
+
+    const { data, error } = await supabase
+      .from("placed_items")
+      .insert({
+        page_id: initial.page.id,
+        inventory_item_id: inv.id,
+        name: inv.name,
+        brand: inv.brand,
+        svg_markup: inv.svg_markup,
+        width_mm: inv.width_mm,
+        depth_mm: inv.depth_mm,
+        height_mm: inv.height_mm,
+        x: world.x,
+        y: world.y,
+      })
+      .select("*")
+      .single();
+    useEditor.getState().removePlacedItem(optimisticId);
+    if (!error && data) {
+      useEditor.getState().upsertPlacedItem(data as PlacedItem);
+      useEditor.getState().setSelection({ kind: "placed", id: (data as any).id });
+    }
+  }
+
+  function onItemMove(id: string, x: number, y: number) {
+    const item = useEditor.getState().placedItems[id];
+    if (!item) return;
+    useEditor.getState().upsertPlacedItem({ ...item, x: x as any, y: y as any });
+  }
+  function onItemResize(id: string, scale_w: number, scale_d: number) {
+    const item = useEditor.getState().placedItems[id];
+    if (!item) return;
+    useEditor.getState().upsertPlacedItem({
+      ...item,
+      scale_w: scale_w as any,
+      scale_d: scale_d as any,
+    });
+  }
+  function onItemRotate(id: string, rotation: number) {
+    const item = useEditor.getState().placedItems[id];
+    if (!item) return;
+    useEditor.getState().upsertPlacedItem({ ...item, rotation: rotation as any });
+  }
+  async function onItemMoveEnd(id: string) {
+    const item = useEditor.getState().placedItems[id];
+    if (!item) return;
+    if (id.startsWith("tmp-")) return; // optimistic, will be replaced by insert response
+    await supabase
+      .from("placed_items")
+      .update({
+        x: item.x,
+        y: item.y,
+        scale_w: item.scale_w,
+        scale_d: item.scale_d,
+        rotation: item.rotation,
+      })
+      .eq("id", id);
+  }
+  async function updatePlacedItem(id: string, patch: Partial<PlacedItem>) {
+    const item = useEditor.getState().placedItems[id];
+    if (!item) return;
+    const merged = { ...item, ...patch } as PlacedItem;
+    useEditor.getState().upsertPlacedItem(merged);
+    if (id.startsWith("tmp-")) return;
+    await supabase
+      .from("placed_items")
+      .update(patch as any)
+      .eq("id", id);
+  }
+  async function deletePlacedItem(id: string) {
+    useEditor.getState().removePlacedItem(id);
+    if (id.startsWith("tmp-")) return;
+    await supabase.from("placed_items").delete().eq("id", id);
   }
 
   async function onUploadFile(file: File) {
@@ -426,6 +549,10 @@ export function Editor({ initial }: { initial: InitialData }) {
           onClickWorld={onClickWorld}
           onSelectionPick={onSelectionPick}
           onCanvasReady={(api) => (canvasApi.current = api)}
+          onItemMove={onItemMove}
+          onItemResize={onItemResize}
+          onItemRotate={onItemRotate}
+          onItemMoveEnd={onItemMoveEnd}
         />
         <NotesOverlay
           canEdit={useEditorCanEdit()}
@@ -455,13 +582,30 @@ export function Editor({ initial }: { initial: InitialData }) {
             </button>
           </div>
           <div className="pointer-events-auto flex items-center gap-2">
+            {initial.role !== "viewer" ? (
+              <button
+                onClick={() => setInventoryOpen(true)}
+                title="Inventory (⌘I)"
+                className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-panel px-3 text-sm hover:border-border-strong"
+              >
+                <Package size={14} /> <span className="hidden md:inline">Inventory</span>
+              </button>
+            ) : null}
+            <button
+              onClick={() => setAssistantOpen(true)}
+              title="Ask AI (⌘K)"
+              className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-panel px-3 text-sm hover:border-border-strong"
+              style={{ color: "#7c3aed" }}
+            >
+              <Sparkles size={14} /> <span className="hidden md:inline">Ask AI</span>
+            </button>
             <PresenceStack me={initial.user.id} users={presence} />
             {(initial.role === "owner" || initial.role === "admin") && (
               <button
                 onClick={() => setShareOpen(true)}
                 className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-panel px-3 text-sm hover:border-border-strong"
               >
-                <Share2 size={14} /> Share
+                <Share2 size={14} /> <span className="hidden md:inline">Share</span>
               </button>
             )}
             {initial.role === "viewer" ? (
@@ -505,6 +649,30 @@ export function Editor({ initial }: { initial: InitialData }) {
           scope="page"
           targetId={initial.page.id}
         />
+        <InventoryDrawer
+          open={inventoryOpen}
+          onClose={() => setInventoryOpen(false)}
+          orgId={initial.orgId}
+          hasScale={!!useEditor.getState().scale}
+          onPlace={(inv) => {
+            // Place at current canvas centre.
+            const cv = document.querySelector(".pixi-host") as HTMLElement | null;
+            const r = cv?.getBoundingClientRect();
+            const sx = r ? r.width / 2 : 0;
+            const sy = r ? r.height / 2 : 0;
+            const view = useEditor.getState().view;
+            const w = { x: (sx - view.x) / view.zoom, y: (sy - view.y) / view.zoom };
+            placeItem(inv, w);
+            setInventoryOpen(false);
+          }}
+          onDragStart={(inv) => setDraggingItem(inv)}
+          onDragEnd={() => setDraggingItem(null)}
+        />
+        <AssistantDrawer
+          open={assistantOpen}
+          onClose={() => setAssistantOpen(false)}
+          pageId={initial.page.id}
+        />
       </div>
       <MobileSheet
         pageName={initial.page.name}
@@ -521,10 +689,12 @@ export function Editor({ initial }: { initial: InitialData }) {
         onRename={renamePage}
         onRenameMeasurement={renameMeasurement}
         onDeleteMeasurement={deleteMeasurement}
+        onUpdatePlacedItem={updatePlacedItem}
         onDeleteSelection={() => {
           const sel = useEditor.getState().selection;
           if (sel?.kind === "measurement") deleteMeasurement(sel.id);
           if (sel?.kind === "note") deleteNote(sel.id);
+          if (sel?.kind === "placed") deletePlacedItem(sel.id);
           useEditor.getState().setSelection(null);
         }}
         scaleControls={
