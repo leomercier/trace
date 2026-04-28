@@ -1,0 +1,47 @@
+import type { Config } from "tailwindcss";
+
+const config: Config = {
+  content: [
+    "./app/**/*.{ts,tsx}",
+    "./components/**/*.{ts,tsx}",
+    "./lib/**/*.{ts,tsx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        bg: "var(--bg)",
+        canvas: "var(--canvas)",
+        panel: "var(--panel)",
+        "panel-muted": "var(--panel-muted)",
+        border: "var(--border)",
+        "border-strong": "var(--border-strong)",
+        ink: "var(--ink)",
+        "ink-muted": "var(--ink-muted)",
+        "ink-faint": "var(--ink-faint)",
+        accent: "var(--accent)",
+        measure: "var(--measure)",
+        note: "var(--note)",
+        "note-border": "var(--note-border)",
+      },
+      fontFamily: {
+        serif: ["var(--font-serif)"],
+        sans: ["var(--font-sans)"],
+        mono: ["var(--font-mono)"],
+        hand: ["var(--font-hand)"],
+      },
+      boxShadow: {
+        sm: "var(--shadow-sm)",
+        md: "var(--shadow-md)",
+        lg: "var(--shadow-lg)",
+      },
+      borderRadius: {
+        sm: "var(--radius-sm)",
+        md: "var(--radius-md)",
+        lg: "var(--radius-lg)",
+      },
+    },
+  },
+  plugins: [],
+};
+
+export default config;

@@ -1,0 +1,561 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { Canvas, type CanvasHandle } from "./Canvas";
+import { NotesOverlay } from "./NotesOverlay";
+import { Toolbar } from "@/components/panels/Toolbar";
+import { Inspector } from "@/components/panels/Inspector";
+import { CalibrateDialog } from "@/components/panels/CalibrateDialog";
+import { useEditor, type Tool } from "@/stores/editorStore";
+import type { Measurement, Note, Page } from "@/lib/supabase/types";
+import { createClient } from "@/lib/supabase/client";
+import { parseFile, inferFileType } from "./parsers";
+import { Button } from "@/components/ui/Button";
+import { Upload, Download, Maximize2, Share2 } from "lucide-react";
+import { ShareDialog } from "@/components/panels/ShareDialog";
+import { MobileSheet } from "@/components/panels/MobileSheet";
+import { AttachmentsPanel } from "@/components/panels/AttachmentsPanel";
+import { idbCacheGet, idbCacheSet, hashBlob } from "@/lib/utils/idb";
+import { subscribePage, broadcastCursor, broadcastDraft } from "@/lib/realtime/page";
+import { Avatar, stringToColor } from "@/components/ui/Avatar";
+import type { Bounds } from "@/lib/utils/geometry";
+
+interface InitialData {
+  page: Page;
+  measurements: Measurement[];
+  notes: Note[];
+  role: "owner" | "admin" | "editor" | "viewer";
+  user: { id: string; name: string; email: string; avatar: string | null };
+  orgId: string;
+  projectId: string;
+  signedUrl: string | null;
+}
+
+export function Editor({ initial }: { initial: InitialData }) {
+  const supabase = createClient();
+  const canvasApi = useRef<CanvasHandle | null>(null);
+  const [calibrateOpen, setCalibrateOpen] = useState(false);
+  const [calibrateLength, setCalibrateLength] = useState(0);
+  const [calibratePending, setCalibratePending] = useState<{
+    ax: number;
+    ay: number;
+    bx: number;
+    by: number;
+  } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [presence, setPresence] = useState<
+    { userId: string; name: string; color: string }[]
+  >([]);
+
+  // boot store
+  useEffect(() => {
+    useEditor.getState().init({
+      pageId: initial.page.id,
+      role: initial.role,
+      measurements: initial.measurements,
+      notes: initial.notes,
+      scale:
+        initial.page.scale_real_per_unit
+          ? {
+              realPerUnit: +initial.page.scale_real_per_unit,
+              unit: (initial.page.scale_unit || "mm") as any,
+            }
+          : null,
+      bounds: (initial.page.source_bounds as Bounds | null) || null,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial.page.id]);
+
+  // load source file (parse + cache by hash)
+  useEffect(() => {
+    if (!initial.signedUrl) return;
+    let cancelled = false;
+    (async () => {
+      const res = await fetch(initial.signedUrl!);
+      const blob = await res.blob();
+      const hash = await hashBlob(blob);
+      const cached = await idbCacheGet(hash);
+      const type = (initial.page.source_file_type || inferFileType(initial.page.source_file_name || "")) as any;
+      let parsed = cached;
+      if (!parsed) {
+        parsed = await parseFile(blob, type);
+        await idbCacheSet(hash, parsed);
+      }
+      if (cancelled) return;
+      useEditor.getState().setEntities(parsed.entities);
+      useEditor.getState().setBounds(parsed.bounds);
+      // Persist bounds back if we just computed them
+      if (!initial.page.source_bounds) {
+        await supabase
+          .from("pages")
+          .update({ source_bounds: parsed.bounds })
+          .eq("id", initial.page.id);
+      }
+    })().catch((err) => {
+      console.error("Failed to load drawing:", err);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial.page.id, initial.signedUrl]);
+
+  // realtime subscription
+  useEffect(() => {
+    const channel = subscribePage({
+      pageId: initial.page.id,
+      userId: initial.user.id,
+      userName: initial.user.name,
+      onMeasurement: (m, kind) => {
+        const s = useEditor.getState();
+        if (kind === "DELETE") s.removeMeasurement(m.id);
+        else s.upsertMeasurement(m);
+      },
+      onNote: (n, kind) => {
+        const s = useEditor.getState();
+        if (kind === "DELETE") s.removeNote(n.id);
+        else s.upsertNote(n);
+      },
+      onPageUpdate: (p) => {
+        const s = useEditor.getState();
+        if (p.scale_real_per_unit) s.setScale(+p.scale_real_per_unit, (p.scale_unit || "mm") as any);
+        if (p.source_bounds) s.setBounds(p.source_bounds as Bounds);
+      },
+      onCursor: (c) => {
+        if (c.userId === initial.user.id) return;
+        useEditor.getState().upsertCursor({
+          userId: c.userId,
+          name: c.name,
+          color: c.color,
+          x: c.x,
+          y: c.y,
+          tool: c.tool,
+          ts: Date.now(),
+        });
+      },
+      onPresence: setPresence,
+    });
+    return () => {
+      try { channel.unsubscribe(); } catch {}
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial.page.id]);
+
+  // keyboard shortcuts
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement;
+      if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || (target as any)?.isContentEditable) return;
+      const map: Record<string, Tool> = {
+        v: "select",
+        h: "pan",
+        m: "measure",
+        n: "note",
+        c: "calibrate",
+      };
+      const t = map[e.key.toLowerCase()];
+      if (t) useEditor.getState().setTool(t);
+      if (e.key === "Escape") {
+        useEditor.getState().setDraft(null);
+        useEditor.getState().setSelection(null);
+      }
+      if ((e.key === "Delete" || e.key === "Backspace")) {
+        const sel = useEditor.getState().selection;
+        if (sel && useEditor.getState().canEdit) {
+          if (sel.kind === "measurement") deleteMeasurement(sel.id);
+          if (sel.kind === "note") deleteNote(sel.id);
+          useEditor.getState().setSelection(null);
+        }
+      }
+      if (e.key === "f" || e.key === "F") {
+        canvasApi.current?.fitToContent();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Cursor broadcast (~30 Hz)
+  const lastCursorTs = useRef(0);
+  const myColor = useRef(stringToColor(initial.user.id));
+
+  function onPointerWorld(p: { x: number; y: number; snapped: boolean }) {
+    const now = performance.now();
+    const tool = useEditor.getState().tool;
+    const draft = useEditor.getState().draft;
+    if (draft) {
+      useEditor.getState().setDraft({ ...draft, end: { x: p.x, y: p.y } });
+      // broadcast draft on a slower clock
+      if (now - lastCursorTs.current > 60) {
+        broadcastDraft(initial.page.id, {
+          userId: initial.user.id,
+          start: draft.start,
+          end: { x: p.x, y: p.y },
+        });
+      }
+    }
+    if (now - lastCursorTs.current > 33) {
+      lastCursorTs.current = now;
+      broadcastCursor(initial.page.id, {
+        userId: initial.user.id,
+        name: initial.user.name,
+        color: myColor.current,
+        x: p.x,
+        y: p.y,
+        tool,
+      });
+    }
+  }
+
+  async function onClickWorld(p: { x: number; y: number; snapped: boolean }) {
+    const s = useEditor.getState();
+    const tool = s.tool;
+    if (!s.canEdit) return;
+    if (tool === "measure" || tool === "calibrate") {
+      if (!s.draft) {
+        s.setDraft({ tool, start: { x: p.x, y: p.y }, end: { x: p.x, y: p.y } });
+      } else {
+        const { start } = s.draft;
+        const end = { x: p.x, y: p.y };
+        s.setDraft(null);
+        if (tool === "measure") {
+          await createMeasurement(start, end);
+        } else {
+          const len = Math.hypot(end.x - start.x, end.y - start.y);
+          if (len < 0.0001) return;
+          setCalibrateLength(len);
+          setCalibratePending({ ax: start.x, ay: start.y, bx: end.x, by: end.y });
+          setCalibrateOpen(true);
+        }
+      }
+    } else if (tool === "note") {
+      await createNote({ x: p.x, y: p.y });
+    }
+  }
+
+  async function createMeasurement(a: { x: number; y: number }, b: { x: number; y: number }) {
+    const s = useEditor.getState();
+    const optimisticId = `tmp-${crypto.randomUUID()}`;
+    const optimistic: Measurement = {
+      id: optimisticId,
+      page_id: initial.page.id,
+      ax: a.x as any,
+      ay: a.y as any,
+      bx: b.x as any,
+      by: b.y as any,
+      label: null,
+      created_by: initial.user.id,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    s.upsertMeasurement(optimistic);
+    const { data, error } = await supabase
+      .from("measurements")
+      .insert({
+        page_id: initial.page.id,
+        ax: a.x,
+        ay: a.y,
+        bx: b.x,
+        by: b.y,
+      })
+      .select("*")
+      .single();
+    s.removeMeasurement(optimisticId);
+    if (!error && data) s.upsertMeasurement(data as any);
+  }
+
+  async function deleteMeasurement(id: string) {
+    useEditor.getState().removeMeasurement(id);
+    await supabase.from("measurements").delete().eq("id", id);
+  }
+
+  async function createNote(p: { x: number; y: number }) {
+    const optimisticId = `tmp-${crypto.randomUUID()}`;
+    const optimistic: Note = {
+      id: optimisticId,
+      page_id: initial.page.id,
+      x: p.x as any,
+      y: p.y as any,
+      w: 200 as any,
+      h: 100 as any,
+      text: "",
+      color: "#fef3c7",
+      created_by: initial.user.id,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    useEditor.getState().upsertNote(optimistic);
+    const { data, error } = await supabase
+      .from("notes")
+      .insert({ page_id: initial.page.id, x: p.x, y: p.y })
+      .select("*")
+      .single();
+    useEditor.getState().removeNote(optimisticId);
+    if (!error && data) useEditor.getState().upsertNote(data as any);
+  }
+
+  async function deleteNote(id: string) {
+    useEditor.getState().removeNote(id);
+    await supabase.from("notes").delete().eq("id", id);
+  }
+
+  async function updateNote(n: Note) {
+    useEditor.getState().upsertNote(n);
+    await supabase
+      .from("notes")
+      .update({ x: n.x, y: n.y, w: n.w, h: n.h, text: n.text, color: n.color })
+      .eq("id", n.id);
+  }
+
+  async function applyCalibration(real: number, unit: any) {
+    if (!calibratePending) return;
+    const len = calibrateLength;
+    const realPerUnit = real / len;
+    useEditor.getState().setScale(realPerUnit, unit);
+    await supabase
+      .from("pages")
+      .update({ scale_real_per_unit: realPerUnit, scale_unit: unit })
+      .eq("id", initial.page.id);
+    setCalibrateOpen(false);
+    setCalibratePending(null);
+  }
+
+  function onSelectionPick(id: string | null) {
+    useEditor.getState().setSelection(id ? { kind: "measurement", id } : null);
+  }
+
+  async function onUploadFile(file: File) {
+    const path = `${initial.orgId}/${initial.projectId}/${initial.page.id}/${file.name}`;
+    const { error } = await supabase.storage.from("drawings").upload(path, file, {
+      upsert: true,
+      cacheControl: "3600",
+    });
+    if (error) {
+      alert("Upload failed: " + error.message);
+      return;
+    }
+    const type = inferFileType(file.name);
+    await supabase
+      .from("pages")
+      .update({
+        source_storage_path: path,
+        source_file_type: type,
+        source_file_name: file.name,
+        source_file_size: file.size,
+      })
+      .eq("id", initial.page.id);
+    window.location.reload();
+  }
+
+  async function exportPng() {
+    // Use the canvas element directly
+    const cv = document.querySelector(".pixi-host canvas") as HTMLCanvasElement | null;
+    if (!cv) return;
+    const url = cv.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${initial.page.name}.png`;
+    a.click();
+  }
+
+  async function renamePage(name: string) {
+    await supabase.from("pages").update({ name }).eq("id", initial.page.id);
+  }
+
+  return (
+    <div className="flex h-[calc(100vh-57px)] w-full">
+      <div className="relative min-w-0 flex-1">
+        <Canvas
+          onPointerWorld={onPointerWorld}
+          onClickWorld={onClickWorld}
+          onSelectionPick={onSelectionPick}
+          onCanvasReady={(api) => (canvasApi.current = api)}
+        />
+        <NotesOverlay
+          canEdit={useEditorCanEdit()}
+          onUpdate={updateNote}
+          onDelete={deleteNote}
+        />
+        <Toolbar />
+
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between p-3">
+          <div className="pointer-events-auto flex items-center gap-2">
+            {!initial.signedUrl && initial.role !== "viewer" ? (
+              <UploadButton onUpload={onUploadFile} />
+            ) : null}
+            <button
+              onClick={() => canvasApi.current?.fitToContent()}
+              title="Fit to content (F)"
+              className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-panel px-3 text-sm hover:border-border-strong"
+            >
+              <Maximize2 size={14} /> Fit
+            </button>
+            <button
+              onClick={exportPng}
+              title="Export PNG"
+              className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-panel px-3 text-sm hover:border-border-strong"
+            >
+              <Download size={14} /> PNG
+            </button>
+          </div>
+          <div className="pointer-events-auto flex items-center gap-2">
+            <PresenceStack me={initial.user.id} users={presence} />
+            {(initial.role === "owner" || initial.role === "admin") && (
+              <button
+                onClick={() => setShareOpen(true)}
+                className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-panel px-3 text-sm hover:border-border-strong"
+              >
+                <Share2 size={14} /> Share
+              </button>
+            )}
+            {initial.role === "viewer" ? (
+              <span className="rounded-md border border-border bg-panel px-2 py-1 text-[11px] uppercase tracking-wider text-ink-muted">
+                Viewing
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+        {!initial.signedUrl && initial.role !== "viewer" ? (
+          <FileDropzone onUpload={onUploadFile} />
+        ) : null}
+
+        <AttachmentsPanel
+          pageId={initial.page.id}
+          orgId={initial.orgId}
+          projectId={initial.projectId}
+          canEdit={initial.role !== "viewer"}
+        />
+
+        <CalibrateDialog
+          open={calibrateOpen}
+          onClose={() => setCalibrateOpen(false)}
+          rawLength={calibrateLength}
+          onApply={applyCalibration}
+        />
+        <ShareDialog
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+          scope="page"
+          targetId={initial.page.id}
+        />
+      </div>
+      <MobileSheet
+        pageName={initial.page.name}
+        onCalibrateStart={() => useEditor.getState().setTool("calibrate")}
+        onDeleteSelection={() => {
+          const sel = useEditor.getState().selection;
+          if (sel?.kind === "measurement") deleteMeasurement(sel.id);
+          if (sel?.kind === "note") deleteNote(sel.id);
+          useEditor.getState().setSelection(null);
+        }}
+      />
+      <Inspector
+        pageName={initial.page.name}
+        onRename={renamePage}
+        onDeleteSelection={() => {
+          const sel = useEditor.getState().selection;
+          if (sel?.kind === "measurement") deleteMeasurement(sel.id);
+          if (sel?.kind === "note") deleteNote(sel.id);
+          useEditor.getState().setSelection(null);
+        }}
+        scaleControls={
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => useEditor.getState().setTool("calibrate")}
+            disabled={initial.role === "viewer"}
+          >
+            Calibrate scale
+          </Button>
+        }
+      />
+    </div>
+  );
+}
+
+function useEditorCanEdit() {
+  return useEditor((s) => s.canEdit);
+}
+
+function PresenceStack({
+  users,
+  me,
+}: {
+  users: { userId: string; name: string; color: string }[];
+  me: string;
+}) {
+  const others = users.filter((u) => u.userId !== me);
+  if (others.length === 0) return null;
+  return (
+    <div className="flex -space-x-2">
+      {others.slice(0, 5).map((u) => (
+        <div
+          key={u.userId}
+          className="rounded-full border-2 border-bg"
+          title={u.name}
+        >
+          <Avatar name={u.name} color={u.color} size={28} />
+        </div>
+      ))}
+      {others.length > 5 ? (
+        <span className="ml-2 self-center text-xs text-ink-muted">+{others.length - 5}</span>
+      ) : null}
+    </div>
+  );
+}
+
+function UploadButton({ onUpload }: { onUpload: (f: File) => void }) {
+  return (
+    <label className="flex h-9 cursor-pointer items-center gap-1.5 rounded-md border border-border bg-panel px-3 text-sm hover:border-border-strong">
+      <Upload size={14} /> Replace
+      <input
+        type="file"
+        className="hidden"
+        accept=".dwg,.dxf,.pdf,.svg,.png,.jpg,.jpeg"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onUpload(f);
+        }}
+      />
+    </label>
+  );
+}
+
+function FileDropzone({ onUpload }: { onUpload: (f: File) => void }) {
+  const [over, setOver] = useState(false);
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        const f = e.dataTransfer.files?.[0];
+        if (f) onUpload(f);
+      }}
+      className={`pointer-events-auto absolute inset-0 m-12 flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-ink-muted transition-colors ${
+        over ? "border-ink bg-panel-muted" : "border-border bg-canvas/30"
+      }`}
+    >
+      <Upload size={28} className="text-ink-faint" />
+      <p className="font-serif text-2xl text-ink">Drop a drawing to start</p>
+      <p className="text-sm">DWG, DXF, PDF, SVG, PNG, JPG</p>
+      <label className="mt-3 cursor-pointer rounded-md border border-border bg-panel px-4 py-2 text-sm text-ink hover:border-border-strong">
+        Or browse files
+        <input
+          type="file"
+          className="hidden"
+          accept=".dwg,.dxf,.pdf,.svg,.png,.jpg,.jpeg"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onUpload(f);
+          }}
+        />
+      </label>
+    </div>
+  );
+}
