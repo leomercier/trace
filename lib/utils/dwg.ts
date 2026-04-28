@@ -45,10 +45,14 @@ async function getLibreDwg(): Promise<any> {
   if (_loadingPromise) return _loadingPromise;
 
   _loadingPromise = (async () => {
-    // The UMD bundle exposes the API on window. Different versions have
-    // exposed it under different globals — probe a couple of common names.
+    // The UMD bundle exposes itself as window["libredwg-web"]. Older builds
+    // used different globals, so keep the legacy probes as fallbacks.
     await loadScript(`${CDN_BASE}/dist/libredwg-web.umd.cjs`);
-    const ns = (window as any).mlightcad || (window as any).LibreDwgWeb || window;
+    const ns =
+      (window as any)["libredwg-web"] ||
+      (window as any).mlightcad ||
+      (window as any).LibreDwgWeb ||
+      window;
     const LibreDwg =
       ns.LibreDwg || (window as any).LibreDwg || (window as any).libredwg;
     if (!LibreDwg) throw new Error("LibreDwg UMD did not expose a global");
