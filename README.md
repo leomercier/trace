@@ -75,10 +75,28 @@ All variables and what they do:
      - `https://your-production-domain.com/auth/callback`
      - `https://*-your-vercel-team.vercel.app/auth/callback` (preview deploys)
      - `http://localhost:3000/auth/callback` (local dev)
-6. **Email templates** (Authentication → Email Templates). Confirm the magic
-   link template uses `{{ .ConfirmationURL }}` (the default does). If you
-   customised it to use `{{ .SiteURL }}`, links will only ever go to the Site
-   URL above.
+6. **Email templates** (Authentication → Email Templates). The default magic
+   link template uses `{{ .ConfirmationURL }}`, which routes through PKCE.
+   That requires the user to click the link in the **same browser** they
+   signed up in — open the email on your phone after signing up on desktop
+   and you'll get a `PKCE code verifier not found` error.
+   
+   **Recommended:** override the **Magic Link** and **Confirm signup**
+   templates to point straight at our `/auth/confirm` endpoint, which uses
+   the token-hash flow and works across browsers/devices:
+   
+   ```html
+   <h2>Sign in to Trace</h2>
+   <p>
+     <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email&next=/app">
+       Sign in
+     </a>
+   </p>
+   <p>If you didn't request this, you can ignore this email.</p>
+   ```
+   
+   Use `type=email` for magic-link / signup templates and `type=invite` for
+   the invite template if you customise that one too.
 
 ### Vercel
 
