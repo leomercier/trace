@@ -11,6 +11,9 @@ import {
   Paperclip,
   Download,
   Maximize2,
+  Type,
+  Slash,
+  Square,
 } from "lucide-react";
 import { useEditor, type Tool } from "@/stores/editorStore";
 import { cn } from "@/lib/utils/cn";
@@ -26,6 +29,9 @@ const TOOLS: {
   { id: "pan", label: "Pan", icon: Hand, key: "H", viewerOk: true },
   { id: "measure", label: "Measure", icon: Ruler, key: "M" },
   { id: "note", label: "Note", icon: StickyNote, key: "N" },
+  { id: "text", label: "Text", icon: Type, key: "T" },
+  { id: "line", label: "Line", icon: Slash, key: "L" },
+  { id: "rect", label: "Rectangle", icon: Square, key: "R" },
   { id: "calibrate", label: "Calibrate", icon: Crosshair, key: "C" },
 ];
 

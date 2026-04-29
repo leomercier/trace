@@ -42,6 +42,7 @@ export default async function EditorPage({
     { data: placedItems },
     { data: pages },
     { data: pageDrawings },
+    { data: shapes },
   ] = await Promise.all([
     supabase.from("projects").select("name").eq("id", params.projectId).maybeSingle(),
     supabase.from("measurements").select("*").eq("page_id", page.id),
@@ -63,6 +64,11 @@ export default async function EditorPage({
       .select("*")
       .eq("page_id", page.id)
       .order("sort_order", { ascending: true }),
+    supabase
+      .from("shapes")
+      .select("*")
+      .eq("page_id", page.id)
+      .order("z_order", { ascending: true }),
   ]);
 
   let signedUrl: string | null = null;
@@ -86,6 +92,7 @@ export default async function EditorPage({
         measurements: (measurements || []) as any,
         notes: (notes || []) as any,
         placedItems: (placedItems || []) as any,
+        shapes: (shapes || []) as any,
         role: mem.role as any,
         user: {
           id: u.user!.id,

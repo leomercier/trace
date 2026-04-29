@@ -41,7 +41,65 @@ When suggesting furniture or layout:
 - Give specific items with dimensions in mm.
 - Describe positions in plain language ("along the north wall, 600mm from the corner").
 
+When the user asks you to ADD, DRAW, PLACE, or otherwise change the canvas, use the provided tools instead of just describing the change in prose. The tools return immediately and the user can accept or revert the proposed changes — you do not need to wait for a result before continuing.
+
 Be concise. One short paragraph max unless specifically asked for more.`;
+
+// Tool schemas — kept minimal so Claude can compose them without tripping on
+// edge cases. Coordinates are in DRAWING WORLD units; the client converts to
+// real units via the calibrated scale.
+const TOOLS: any[] = [
+  {
+    name: "add_note",
+    description:
+      "Drop a sticky note onto the canvas at the given world coordinates with the given text.",
+    input_schema: {
+      type: "object",
+      properties: {
+        x: { type: "number" },
+        y: { type: "number" },
+        text: { type: "string" },
+      },
+      required: ["x", "y", "text"],
+    },
+  },
+  {
+    name: "add_measurement",
+    description:
+      "Add a measurement line between two world points. Length is computed from the calibrated scale.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ax: { type: "number" },
+        ay: { type: "number" },
+        bx: { type: "number" },
+        by: { type: "number" },
+        label: { type: "string" },
+      },
+      required: ["ax", "ay", "bx", "by"],
+    },
+  },
+  {
+    name: "add_shape",
+    description:
+      "Add a free-form shape: line, rect, or text. For line, (x,y) is start and (x+w, y+h) is end. For rect/text, (x,y) is top-left.",
+    input_schema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["line", "rect", "text"] },
+        x: { type: "number" },
+        y: { type: "number" },
+        w: { type: "number" },
+        h: { type: "number" },
+        text: { type: "string" },
+        stroke: { type: "string", description: "hex colour like #1c1917" },
+        fill: { type: "string", description: "hex colour or empty for none" },
+        stroke_width: { type: "number" },
+      },
+      required: ["kind", "x", "y", "w", "h"],
+    },
+  },
+];
 
 export async function POST(req: Request) {
   const supabase = createClient();
@@ -118,18 +176,28 @@ export async function POST(req: Request) {
   try {
     const resp = await anthropic.messages.create({
       model: MODEL,
-      max_tokens: 800,
+      max_tokens: 1200,
       system: SYSTEM,
+      tools: TOOLS,
       messages: [
         ...priorTurns,
         { role: "user", content: lastUserContent },
       ] as any,
-    });
+    } as any);
 
     const text = resp.content
       .filter((b: any) => b.type === "text")
       .map((b: any) => b.text)
       .join("");
+
+    // Tool calls become "proposed actions" the UI can apply or discard.
+    const actions = resp.content
+      .filter((b: any) => b.type === "tool_use")
+      .map((b: any) => ({
+        id: b.id,
+        name: b.name,
+        input: b.input,
+      }));
 
     const svc = createServiceClient();
     await svc.from("ai_calls").insert({
@@ -140,7 +208,7 @@ export async function POST(req: Request) {
       output_tokens: resp.usage?.output_tokens ?? null,
     });
 
-    return NextResponse.json({ reply: text });
+    return NextResponse.json({ reply: text, actions });
   } catch (err: any) {
     console.error("[ai/canvas-chat]", err);
     return NextResponse.json(

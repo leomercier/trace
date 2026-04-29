@@ -9,6 +9,7 @@ import { MeasurementLayer } from "./pixi/MeasurementLayer";
 import { CursorLayer } from "./pixi/CursorLayer";
 import { GridLayer } from "./pixi/GridLayer";
 import { PlacedItemsLayer } from "./pixi/PlacedItemsLayer";
+import { ShapesLayer } from "./pixi/ShapesLayer";
 import { SnapIndex } from "./pixi/Snapping";
 
 export interface CanvasHandle {
@@ -27,7 +28,9 @@ export function Canvas({
 }: {
   onPointerWorld?: (p: { x: number; y: number; snapped: boolean }) => void;
   onClickWorld?: (p: { x: number; y: number; snapped: boolean }) => void;
-  onSelectionPick?: (sel: { kind: "measurement" | "placed"; id: string } | null) => void;
+  onSelectionPick?: (
+    sel: { kind: "measurement" | "placed" | "shape"; id: string } | null,
+  ) => void;
   onCanvasReady?: (api: CanvasHandle) => void;
   onItemMove?: (id: string, x: number, y: number) => void;
   onItemResize?: (id: string, scaleW: number, scaleD: number) => void;
@@ -42,6 +45,7 @@ export function Canvas({
     drawingLayer: DrawingLayer;
     measureLayer: MeasurementLayer;
     placedLayer: PlacedItemsLayer;
+    shapesLayer: ShapesLayer;
     cursorLayer: CursorLayer;
     snapBadge: PIXI.Graphics;
     snap: SnapIndex;
@@ -77,11 +81,13 @@ export function Canvas({
       gridLayer.setSize(rect.width, rect.height);
       const drawingLayer = new DrawingLayer();
       const placedLayer = new PlacedItemsLayer(viewport);
+      const shapesLayer = new ShapesLayer(viewport);
       const measureLayer = new MeasurementLayer(viewport);
       const cursorLayer = new CursorLayer(viewport);
       viewport.world.addChild(gridLayer);
       viewport.world.addChild(drawingLayer);
       viewport.world.addChild(placedLayer);
+      viewport.world.addChild(shapesLayer);
       viewport.world.addChild(measureLayer);
       viewport.world.addChild(cursorLayer);
 
@@ -95,6 +101,7 @@ export function Canvas({
         gridLayer,
         drawingLayer,
         placedLayer,
+        shapesLayer,
         measureLayer,
         cursorLayer,
         snapBadge,
@@ -184,6 +191,12 @@ export function Canvas({
           state.scale?.realPerUnit ?? null,
         );
       }
+      if (state.shapes !== prev.shapes || state.selection !== prev.selection) {
+        a.shapesLayer.render(
+          Object.values(state.shapes),
+          state.selection?.kind === "shape" ? state.selection.id : null,
+        );
+      }
       if (state.draft !== prev.draft) {
         a.measureLayer.drawDraft(state.draft?.start || null, state.draft?.end || null);
       }
@@ -202,8 +215,23 @@ export function Canvas({
           state.selection?.kind === "placed" ? state.selection.id : null,
           state.scale?.realPerUnit ?? null,
         );
+        a.shapesLayer.render(
+          Object.values(state.shapes),
+          state.selection?.kind === "shape" ? state.selection.id : null,
+        );
         a.measureLayer.drawDraft(state.draft?.start || null, state.draft?.end || null);
         a.cursorLayer.render(Object.values(state.cursors));
+      }
+      if (state.draft !== prev.draft) {
+        const d = state.draft;
+        if (d && (d.tool === "line" || d.tool === "rect")) {
+          a.shapesLayer.drawDraft(d.tool, d.start, d.end);
+        } else if (
+          (prev.draft && (prev.draft.tool === "line" || prev.draft.tool === "rect")) &&
+          (!d || (d.tool !== "line" && d.tool !== "rect"))
+        ) {
+          a.shapesLayer.drawDraft(null, null, null);
+        }
       }
     });
     // initial render
@@ -485,6 +513,15 @@ export function Canvas({
         const itemHit = a!.placedLayer.hitTest(items, world.x, world.y, realPerUnit);
         if (itemHit) {
           onSelectionPick?.({ kind: "placed", id: itemHit });
+          return;
+        }
+        const shapeHit = a!.shapesLayer.hitTest(
+          Object.values(state.shapes),
+          world.x,
+          world.y,
+        );
+        if (shapeHit) {
+          onSelectionPick?.({ kind: "shape", id: shapeHit });
           return;
         }
         const mid = pickMeasurement(world);

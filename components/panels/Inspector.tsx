@@ -3,7 +3,7 @@
 import { useEditor } from "@/stores/editorStore";
 import { formatLength, type Unit } from "@/lib/utils/units";
 import { useState } from "react";
-import type { Measurement, PlacedItem } from "@/lib/supabase/types";
+import type { Measurement, PlacedItem, Shape, ShapeStyle } from "@/lib/supabase/types";
 import {
   Trash2,
   RotateCw,
@@ -24,6 +24,8 @@ export function Inspector({
   onDeleteMeasurement,
   onUpdatePlacedItem,
   onChangePlacedItemZ,
+  onUpdateShape,
+  onDeleteShape,
   onExportPng,
   scaleControls,
   mobileOpen,
@@ -36,6 +38,8 @@ export function Inspector({
   onDeleteMeasurement: (id: string) => void;
   onUpdatePlacedItem: (id: string, patch: Partial<PlacedItem>) => void;
   onChangePlacedItemZ: (id: string, mode: "front" | "back" | "forward" | "backward") => void;
+  onUpdateShape: (id: string, patch: Partial<Shape>) => void;
+  onDeleteShape: (id: string) => void;
   onExportPng: () => void;
   scaleControls: React.ReactNode;
   mobileOpen?: boolean;
@@ -64,6 +68,8 @@ export function Inspector({
     selection?.kind === "measurement" ? measurements[selection.id] : null;
   const placedSel =
     selection?.kind === "placed" ? placedItems[selection.id] : null;
+  const shapes = useEditor((s) => s.shapes);
+  const shapeSel = selection?.kind === "shape" ? shapes[selection.id] : null;
 
   const asideClass = mobileOpen
     ? "fixed right-0 top-0 z-40 flex h-full w-80 max-w-[85vw] flex-col overflow-y-auto border-l border-border bg-panel shadow-lg md:relative md:w-80 md:max-w-none md:shadow-none"
@@ -124,7 +130,7 @@ export function Inspector({
       <div className="border-b border-border p-4">
         <div className="text-xs uppercase tracking-wider text-ink-faint">Layers</div>
         <div className="mt-2 space-y-2">
-          {(["measurements", "notes", "items", "cursors"] as const).map((k) => (
+          {(["measurements", "notes", "items", "shapes", "cursors"] as const).map((k) => (
             <label key={k} className="flex cursor-pointer items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -181,6 +187,18 @@ export function Inspector({
           <Download size={14} /> Export as PNG
         </button>
       </div>
+
+      {shapeSel ? (
+        <div className="border-b border-border p-4">
+          <div className="text-xs uppercase tracking-wider text-ink-faint">Shape</div>
+          <ShapeProperties
+            shape={shapeSel}
+            canEdit={canEdit}
+            onUpdate={(patch) => onUpdateShape(shapeSel.id, patch)}
+            onDelete={() => onDeleteShape(shapeSel.id)}
+          />
+        </div>
+      ) : null}
 
       {placedSel ? (
         <div className="border-b border-border p-4">
@@ -635,4 +653,229 @@ function toMmFromUnit(value: number, unit: Unit): number {
   if (unit === "in") return value * 25.4;
   if (unit === "ft") return value * 304.8;
   return value;
+}
+
+const PRESET_STROKE = ["#1c1917", "#dc2626", "#0891b2", "#16a34a", "#7c3aed", "#d97706"];
+const PRESET_FILL = [null, "#ffffff", "#fef3c7", "#dbeafe", "#dcfce7", "#fce7f3", "#1c1917"];
+
+function ShapeProperties({
+  shape,
+  canEdit,
+  onUpdate,
+  onDelete,
+}: {
+  shape: Shape;
+  canEdit: boolean;
+  onUpdate: (patch: Partial<Shape>) => void;
+  onDelete: () => void;
+}) {
+  const editable = canEdit && !shape.locked;
+  const isText = shape.kind === "text";
+
+  return (
+    <div className="mt-3 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-medium capitalize">{shape.kind}</div>
+        {canEdit ? (
+          <button
+            onClick={() => onUpdate({ locked: !shape.locked })}
+            className={`flex h-7 items-center gap-1 rounded border px-2 text-xs ${
+              shape.locked
+                ? "border-ink bg-ink text-white"
+                : "border-border bg-panel-muted text-ink-muted hover:text-ink"
+            }`}
+          >
+            {shape.locked ? "Locked" : "Lock"}
+          </button>
+        ) : null}
+      </div>
+
+      {isText ? (
+        <div>
+          <div className="mb-1 text-[10px] uppercase tracking-wider text-ink-faint">Text</div>
+          <textarea
+            value={shape.text || ""}
+            onChange={(e) => onUpdate({ text: e.target.value })}
+            disabled={!editable}
+            rows={2}
+            placeholder="Type text…"
+            className="w-full rounded-md border border-border bg-panel-muted px-2 py-1.5 text-sm outline-none focus:border-ink"
+          />
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            <div>
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-ink-faint">Size</div>
+              <select
+                disabled={!editable}
+                value={shape.style?.size || 24}
+                onChange={(e) =>
+                  onUpdate({
+                    style: { ...(shape.style || {}), size: parseInt(e.target.value, 10) },
+                  })
+                }
+                className="h-8 w-full rounded-md border border-border bg-panel px-1 text-xs"
+              >
+                {[12, 14, 16, 20, 24, 32, 48, 64, 96].map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-ink-faint">Font</div>
+              <select
+                disabled={!editable}
+                value={shape.style?.font || "Inter"}
+                onChange={(e) =>
+                  onUpdate({ style: { ...(shape.style || {}), font: e.target.value } })
+                }
+                className="h-8 w-full rounded-md border border-border bg-panel px-1 text-xs"
+              >
+                {["Inter", "Fraunces", "JetBrains Mono", "Caveat"].map((f) => (
+                  <option key={f} value={f}>{f}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-end gap-1">
+              <button
+                disabled={!editable}
+                onClick={() => onUpdate({ style: { ...(shape.style || {}), bold: !shape.style?.bold } })}
+                className={`h-8 flex-1 rounded-md border text-xs font-bold ${
+                  shape.style?.bold ? "border-ink bg-ink text-white" : "border-border bg-panel-muted"
+                }`}
+              >
+                B
+              </button>
+              <button
+                disabled={!editable}
+                onClick={() => onUpdate({ style: { ...(shape.style || {}), italic: !shape.style?.italic } })}
+                className={`h-8 flex-1 rounded-md border text-xs italic ${
+                  shape.style?.italic ? "border-ink bg-ink text-white" : "border-border bg-panel-muted"
+                }`}
+              >
+                I
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <div>
+        <div className="mb-1 text-[10px] uppercase tracking-wider text-ink-faint">
+          {isText ? "Text colour" : "Outline"}
+        </div>
+        <div className="flex items-center gap-1.5">
+          {PRESET_STROKE.map((c) => {
+            const cur = isText ? shape.style?.color || shape.stroke : shape.stroke;
+            return (
+              <button
+                key={c}
+                disabled={!editable}
+                onClick={() =>
+                  onUpdate(
+                    isText
+                      ? { style: { ...(shape.style || {}), color: c } }
+                      : { stroke: c },
+                  )
+                }
+                className={`size-6 rounded-full border ${
+                  cur === c ? "border-ink ring-2 ring-ink/20" : "border-border"
+                }`}
+                style={{ background: c }}
+              />
+            );
+          })}
+        </div>
+      </div>
+
+      {!isText ? (
+        <>
+          <div>
+            <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wider text-ink-faint">
+              <span>Stroke width</span>
+              <span className="font-num">{shape.stroke_width}px</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={20}
+              step={0.5}
+              value={shape.stroke_width}
+              disabled={!editable}
+              onChange={(e) => onUpdate({ stroke_width: parseFloat(e.target.value) })}
+              className="w-full accent-ink"
+            />
+          </div>
+          <div>
+            <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wider text-ink-faint">
+              <span>Outline opacity</span>
+              <span className="font-num">{Math.round((shape.stroke_opacity ?? 1) * 100)}%</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={shape.stroke_opacity ?? 1}
+              disabled={!editable}
+              onChange={(e) => onUpdate({ stroke_opacity: parseFloat(e.target.value) })}
+              className="w-full accent-ink"
+            />
+          </div>
+        </>
+      ) : null}
+
+      {shape.kind === "rect" ? (
+        <>
+          <div>
+            <div className="mb-1 text-[10px] uppercase tracking-wider text-ink-faint">Fill</div>
+            <div className="flex items-center gap-1.5">
+              {PRESET_FILL.map((c, i) => (
+                <button
+                  key={i}
+                  disabled={!editable}
+                  onClick={() => onUpdate({ fill: c })}
+                  className={`size-6 rounded-full border ${
+                    shape.fill === c ? "border-ink ring-2 ring-ink/20" : "border-border"
+                  }`}
+                  style={{
+                    background: c || "transparent",
+                    backgroundImage: c
+                      ? undefined
+                      : "linear-gradient(45deg, transparent 47.5%, #dc2626 47.5%, #dc2626 52.5%, transparent 52.5%)",
+                  }}
+                  title={c || "No fill"}
+                />
+              ))}
+            </div>
+          </div>
+          {shape.fill ? (
+            <div>
+              <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wider text-ink-faint">
+                <span>Fill opacity</span>
+                <span className="font-num">{Math.round((shape.fill_opacity ?? 1) * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={shape.fill_opacity ?? 1}
+                disabled={!editable}
+                onChange={(e) => onUpdate({ fill_opacity: parseFloat(e.target.value) })}
+                className="w-full accent-ink"
+              />
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
+      {canEdit ? (
+        <button
+          onClick={onDelete}
+          className="text-xs text-measure underline underline-offset-4 hover:no-underline"
+        >
+          Delete shape
+        </button>
+      ) : null}
+    </div>
+  );
 }

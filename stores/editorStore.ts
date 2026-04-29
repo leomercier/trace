@@ -1,11 +1,19 @@
 "use client";
 
 import { create } from "zustand";
-import type { Measurement, Note, PlacedItem } from "@/lib/supabase/types";
+import type { Measurement, Note, PlacedItem, Shape } from "@/lib/supabase/types";
 import type { Bounds, Pt } from "@/lib/utils/geometry";
 import type { Unit } from "@/lib/utils/units";
 
-export type Tool = "select" | "pan" | "measure" | "note" | "calibrate";
+export type Tool =
+  | "select"
+  | "pan"
+  | "measure"
+  | "note"
+  | "calibrate"
+  | "line"
+  | "rect"
+  | "text";
 export type Role = "owner" | "admin" | "editor" | "viewer";
 
 export interface RemoteCursor {
@@ -29,7 +37,7 @@ export interface EditorState {
   // tools
   tool: Tool;
   draft: { tool: Tool; start: Pt; end: Pt } | null;
-  selection: { kind: "measurement" | "note" | "placed"; id: string } | null;
+  selection: { kind: "measurement" | "note" | "placed" | "shape"; id: string } | null;
   // Additional placed-item selections (multi-select). The primary item lives
   // in `selection`; these are siblings.
   multiSelection: Set<string>;
@@ -38,6 +46,7 @@ export interface EditorState {
   measurements: Record<string, Measurement>;
   notes: Record<string, Note>;
   placedItems: Record<string, PlacedItem>;
+  shapes: Record<string, Shape>;
   scale: { realPerUnit: number; unit: Unit } | null;
   bounds: Bounds | null;
 
@@ -45,7 +54,13 @@ export interface EditorState {
   cursors: Record<string, RemoteCursor>;
 
   // layers
-  layers: { measurements: boolean; notes: boolean; cursors: boolean; items: boolean };
+  layers: {
+    measurements: boolean;
+    notes: boolean;
+    cursors: boolean;
+    items: boolean;
+    shapes: boolean;
+  };
 
   // grid
   grid: { visible: boolean; sizeMM: number };
@@ -66,6 +81,7 @@ export interface EditorState {
     measurements: Measurement[];
     notes: Note[];
     placedItems: PlacedItem[];
+    shapes: Shape[];
     scale: { realPerUnit: number; unit: Unit } | null;
     bounds: Bounds | null;
   }) => void;
@@ -81,6 +97,8 @@ export interface EditorState {
   removeNote: (id: string) => void;
   upsertPlacedItem: (p: PlacedItem) => void;
   removePlacedItem: (id: string) => void;
+  upsertShape: (s: Shape) => void;
+  removeShape: (id: string) => void;
   setScale: (realPerUnit: number, unit: Unit) => void;
   setBounds: (b: Bounds) => void;
   setEntities: (entities: ParsedEntity[]) => void;
@@ -150,16 +168,17 @@ export const useEditor = create<EditorState>((set) => ({
   measurements: {},
   notes: {},
   placedItems: {},
+  shapes: {},
   scale: null,
   bounds: null,
   cursors: {},
-  layers: { measurements: true, notes: true, cursors: true, items: true },
+  layers: { measurements: true, notes: true, cursors: true, items: true, shapes: true },
   grid: { visible: true, sizeMM: 1000 },
   entities: [],
   entitiesLoaded: false,
   drawings: {},
 
-  init: ({ pageId, role, measurements, notes, placedItems, scale, bounds }) =>
+  init: ({ pageId, role, measurements, notes, placedItems, shapes, scale, bounds }) =>
     set(() => ({
       pageId,
       role,
@@ -167,6 +186,7 @@ export const useEditor = create<EditorState>((set) => ({
       measurements: Object.fromEntries(measurements.map((m) => [m.id, m])),
       notes: Object.fromEntries(notes.map((n) => [n.id, n])),
       placedItems: Object.fromEntries(placedItems.map((p) => [p.id, p])),
+      shapes: Object.fromEntries(shapes.map((s) => [s.id, s])),
       scale,
       bounds,
       tool: role !== "viewer" ? "select" : "pan",
@@ -209,6 +229,13 @@ export const useEditor = create<EditorState>((set) => ({
     set((s) => {
       const { [id]: _, ...rest } = s.placedItems;
       return { placedItems: rest };
+    }),
+  upsertShape: (sh) =>
+    set((s) => ({ shapes: { ...s.shapes, [sh.id]: sh } })),
+  removeShape: (id) =>
+    set((s) => {
+      const { [id]: _, ...rest } = s.shapes;
+      return { shapes: rest };
     }),
   setScale: (realPerUnit, unit) => set({ scale: { realPerUnit, unit } }),
   setBounds: (b) => set({ bounds: b }),

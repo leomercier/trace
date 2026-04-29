@@ -1,7 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import type { Measurement, Note, Page, PlacedItem } from "@/lib/supabase/types";
+import type { Measurement, Note, Page, PlacedItem, Shape } from "@/lib/supabase/types";
 import type { Tool } from "@/stores/editorStore";
 
 type PostgresKind = "INSERT" | "UPDATE" | "DELETE";
@@ -28,6 +28,7 @@ interface SubscribeArgs {
   onMeasurement: (m: Measurement, kind: PostgresKind) => void;
   onNote: (n: Note, kind: PostgresKind) => void;
   onPlacedItem: (p: PlacedItem, kind: PostgresKind) => void;
+  onShape: (s: Shape, kind: PostgresKind) => void;
   onPageUpdate: (p: Page) => void;
   onCursor: (c: CursorMessage) => void;
   onPresence: (
@@ -64,6 +65,14 @@ export function subscribePage(args: SubscribeArgs) {
       (payload: any) => {
         const row = (payload.new ?? payload.old) as PlacedItem;
         if (row) args.onPlacedItem(row, payload.eventType);
+      },
+    )
+    .on(
+      "postgres_changes" as any,
+      { event: "*", schema: "public", table: "shapes", filter: `page_id=eq.${args.pageId}` },
+      (payload: any) => {
+        const row = (payload.new ?? payload.old) as Shape;
+        if (row) args.onShape(row, payload.eventType);
       },
     )
     .on(

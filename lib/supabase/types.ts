@@ -107,6 +107,40 @@ export interface Note {
   updated_at: string;
 }
 
+export type ShapeKind = "line" | "rect" | "text";
+
+export interface ShapeStyle {
+  font?: string;
+  size?: number;
+  bold?: boolean;
+  italic?: boolean;
+  align?: "left" | "center" | "right";
+  color?: string;
+}
+
+export interface Shape {
+  id: string;
+  page_id: string;
+  kind: ShapeKind;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotation: number;
+  stroke: string;
+  stroke_width: number;
+  stroke_opacity: number;
+  fill: string | null;
+  fill_opacity: number;
+  text: string | null;
+  style: ShapeStyle | null;
+  z_order: number;
+  locked: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PageDrawing {
   id: string;
   page_id: string;

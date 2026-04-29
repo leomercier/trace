@@ -34,6 +34,7 @@ export function ShareViewer({ slug }: { slug: string }) {
       measurements: data.measurements,
       notes: data.notes,
       placedItems: data.placedItems || [],
+      shapes: data.shapes || [],
       scale: page.scale_real_per_unit
         ? { realPerUnit: +page.scale_real_per_unit, unit: page.scale_unit || "mm" }
         : null,

@@ -14,6 +14,7 @@ import type {
   Page,
   PageDrawing,
   PlacedItem,
+  Shape,
 } from "@/lib/supabase/types";
 import { createClient } from "@/lib/supabase/client";
 import { parseFile, inferFileType } from "./parsers";
@@ -36,6 +37,7 @@ interface InitialData {
   measurements: Measurement[];
   notes: Note[];
   placedItems: PlacedItem[];
+  shapes: Shape[];
   role: "owner" | "admin" | "editor" | "viewer";
   user: { id: string; name: string; email: string; avatar: string | null };
   orgId: string;
@@ -66,10 +68,132 @@ export function Editor({ initial }: { initial: InitialData }) {
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [dwgConverting, setDwgConverting] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<{
+    name: string;
+    phase: "uploading" | "processing";
+  } | null>(null);
   const [draggingItem, setDraggingItem] = useState<InventoryItem | null>(null);
   const [presence, setPresence] = useState<
     { userId: string; name: string; color: string }[]
   >([]);
+
+  // ============= Undo (in-memory, session-scoped) =============
+  // Each user action pushes an inverse onto this stack. cmd-Z pops and
+  // executes. Bounded to 50 entries. Not persisted across reload — that
+  // would need a per-user audit table. For tomorrow's test, in-session
+  // undo handles 95% of the "oh no" cases.
+  const undoStack = useRef<Array<() => Promise<void> | void>>([]);
+  const pushUndo = (fn: () => Promise<void> | void) => {
+    undoStack.current.push(fn);
+    if (undoStack.current.length > 50) undoStack.current.shift();
+  };
+  const undoOnce = async () => {
+    const fn = undoStack.current.pop();
+    if (fn) await fn();
+  };
+
+  // ============= Copy / paste (clipboard JSON) =============
+  // We serialize the current selection as JSON to the OS clipboard so it
+  // survives across tabs, and on paste we deserialize and re-create with
+  // a small (40 world-unit) offset.
+  async function copySelection() {
+    const s = useEditor.getState();
+    const sel = s.selection;
+    if (!sel) return;
+    let payload: any = null;
+    if (sel.kind === "shape") payload = { kind: "shape", data: s.shapes[sel.id] };
+    else if (sel.kind === "note") payload = { kind: "note", data: s.notes[sel.id] };
+    else if (sel.kind === "placed") payload = { kind: "placed", data: s.placedItems[sel.id] };
+    else if (sel.kind === "measurement")
+      payload = { kind: "measurement", data: s.measurements[sel.id] };
+    if (!payload) return;
+    try {
+      await navigator.clipboard.writeText(
+        "trace:clip:" + JSON.stringify(payload),
+      );
+    } catch {}
+  }
+
+  async function pasteClipboard() {
+    if (initial.role === "viewer") return;
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      return;
+    }
+    // URL paste → text shape with the URL
+    const urlMatch = text.trim().match(/^https?:\/\/\S+$/);
+    if (urlMatch) {
+      const v = useEditor.getState().view;
+      const cv = document.querySelector(".pixi-host") as HTMLElement | null;
+      const r = cv?.getBoundingClientRect();
+      const sx = r ? r.width / 2 : 0;
+      const sy = r ? r.height / 2 : 0;
+      const wx = (sx - v.x) / v.zoom;
+      const wy = (sy - v.y) / v.zoom;
+      await createShape({
+        kind: "text",
+        x: wx,
+        y: wy,
+        w: 280,
+        h: 56,
+        text: text.trim(),
+      });
+      return;
+    }
+    if (!text.startsWith("trace:clip:")) return;
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(text.slice("trace:clip:".length));
+    } catch {
+      return;
+    }
+    const offset = 40;
+    if (parsed.kind === "shape") {
+      const d = parsed.data;
+      await createShape({
+        kind: d.kind,
+        x: Number(d.x) + offset,
+        y: Number(d.y) + offset,
+        w: Number(d.w),
+        h: Number(d.h),
+        text: d.text || undefined,
+      });
+    } else if (parsed.kind === "placed") {
+      const d = parsed.data;
+      await placeItem(
+        {
+          id: d.inventory_item_id || crypto.randomUUID(),
+          organisation_id: initial.orgId,
+          source: "manual",
+          name: d.name,
+          category: null,
+          brand: d.brand,
+          price_text: null,
+          width_mm: d.width_mm,
+          depth_mm: d.depth_mm,
+          height_mm: d.height_mm,
+          svg_markup: d.svg_markup,
+          thumbnail_url: null,
+          source_url: null,
+          query: null,
+          created_by: null,
+          created_at: new Date().toISOString(),
+        },
+        { x: Number(d.x) + offset, y: Number(d.y) + offset },
+      );
+    } else if (parsed.kind === "note") {
+      const d = parsed.data;
+      await createNote({ x: Number(d.x) + offset, y: Number(d.y) + offset });
+    } else if (parsed.kind === "measurement") {
+      const d = parsed.data;
+      await createMeasurement(
+        { x: Number(d.ax) + offset, y: Number(d.ay) + offset },
+        { x: Number(d.bx) + offset, y: Number(d.by) + offset },
+      );
+    }
+  }
 
   // mark <body> so the org-level mobile bar can hide itself while we're in
   // the editor (the editor renders its own mobile bar).
@@ -86,6 +210,7 @@ export function Editor({ initial }: { initial: InitialData }) {
       measurements: initial.measurements,
       notes: initial.notes,
       placedItems: initial.placedItems,
+      shapes: initial.shapes,
       scale:
         initial.page.scale_real_per_unit
           ? {
@@ -198,6 +323,11 @@ export function Editor({ initial }: { initial: InitialData }) {
         if (kind === "DELETE") s.removePlacedItem(p.id);
         else s.upsertPlacedItem(p);
       },
+      onShape: (sh, kind) => {
+        const s = useEditor.getState();
+        if (kind === "DELETE") s.removeShape(sh.id);
+        else s.upsertShape(sh);
+      },
       onPageUpdate: (p) => {
         const s = useEditor.getState();
         if (p.scale_real_per_unit) s.setScale(+p.scale_real_per_unit, (p.scale_unit || "mm") as any);
@@ -233,6 +363,9 @@ export function Editor({ initial }: { initial: InitialData }) {
         h: "pan",
         m: "measure",
         n: "note",
+        t: "text",
+        l: "line",
+        r: "rect",
         c: "calibrate",
       };
       const t = map[e.key.toLowerCase()];
@@ -247,6 +380,7 @@ export function Editor({ initial }: { initial: InitialData }) {
           if (sel.kind === "measurement") deleteMeasurement(sel.id);
           if (sel.kind === "note") deleteNote(sel.id);
           if (sel.kind === "placed") deletePlacedItem(sel.id);
+          if (sel.kind === "shape") deleteShape(sel.id);
           useEditor.getState().setSelection(null);
         }
       }
@@ -257,6 +391,22 @@ export function Editor({ initial }: { initial: InitialData }) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setAssistantOpen(true);
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undoOnce();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c") {
+        // Don't hijack copy when text is selected in an input.
+        const sel = window.getSelection?.()?.toString();
+        if (!sel) {
+          e.preventDefault();
+          copySelection();
+        }
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        pasteClipboard();
       }
       if (e.key === "f" || e.key === "F") {
         canvasApi.current?.fitToContent();
@@ -302,7 +452,7 @@ export function Editor({ initial }: { initial: InitialData }) {
     const s = useEditor.getState();
     const tool = s.tool;
     if (!s.canEdit) return;
-    if (tool === "measure" || tool === "calibrate") {
+    if (tool === "measure" || tool === "calibrate" || tool === "line" || tool === "rect") {
       if (!s.draft) {
         s.setDraft({ tool, start: { x: p.x, y: p.y }, end: { x: p.x, y: p.y } });
       } else {
@@ -311,6 +461,21 @@ export function Editor({ initial }: { initial: InitialData }) {
         s.setDraft(null);
         if (tool === "measure") {
           await createMeasurement(start, end);
+        } else if (tool === "line") {
+          await createShape({
+            kind: "line",
+            x: start.x,
+            y: start.y,
+            w: end.x - start.x,
+            h: end.y - start.y,
+          });
+        } else if (tool === "rect") {
+          const x = Math.min(start.x, end.x);
+          const y = Math.min(start.y, end.y);
+          const w = Math.abs(end.x - start.x);
+          const h = Math.abs(end.y - start.y);
+          if (w < 0.5 || h < 0.5) return;
+          await createShape({ kind: "rect", x, y, w, h });
         } else {
           const len = Math.hypot(end.x - start.x, end.y - start.y);
           if (len < 0.0001) return;
@@ -321,7 +486,93 @@ export function Editor({ initial }: { initial: InitialData }) {
       }
     } else if (tool === "note") {
       await createNote({ x: p.x, y: p.y });
+    } else if (tool === "text") {
+      await createShape({
+        kind: "text",
+        x: p.x,
+        y: p.y,
+        w: 240,
+        h: 48,
+        text: "",
+      });
     }
+  }
+
+  async function createShape(args: {
+    kind: "line" | "rect" | "text";
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    text?: string;
+  }) {
+    const optimisticId = `tmp-${crypto.randomUUID()}`;
+    const isText = args.kind === "text";
+    const isLine = args.kind === "line";
+    const optimistic: Shape = {
+      id: optimisticId,
+      page_id: initial.page.id,
+      kind: args.kind,
+      x: args.x as any,
+      y: args.y as any,
+      w: args.w as any,
+      h: args.h as any,
+      rotation: 0 as any,
+      stroke: "#1c1917",
+      stroke_width: isLine ? 2 : 1.5,
+      stroke_opacity: 1,
+      fill: isText ? null : args.kind === "rect" ? null : null,
+      fill_opacity: 1,
+      text: args.text ?? null,
+      style: isText ? { font: "Inter", size: 24, color: "#1c1917" } : null,
+      z_order: 0,
+      locked: false,
+      created_by: initial.user.id,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    useEditor.getState().upsertShape(optimistic);
+    useEditor.getState().setSelection({ kind: "shape", id: optimisticId });
+    useEditor.getState().setTool("select");
+
+    const { data, error } = await supabase
+      .from("shapes")
+      .insert({
+        page_id: initial.page.id,
+        kind: optimistic.kind,
+        x: optimistic.x,
+        y: optimistic.y,
+        w: optimistic.w,
+        h: optimistic.h,
+        stroke: optimistic.stroke,
+        stroke_width: optimistic.stroke_width,
+        fill: optimistic.fill,
+        text: optimistic.text,
+        style: optimistic.style,
+      })
+      .select("*")
+      .single();
+    useEditor.getState().removeShape(optimisticId);
+    if (!error && data) {
+      useEditor.getState().upsertShape(data as Shape);
+      useEditor.getState().setSelection({ kind: "shape", id: (data as any).id });
+      const newId = (data as any).id as string;
+      pushUndo(() => deleteShape(newId));
+    }
+  }
+
+  async function updateShape(id: string, patch: Partial<Shape>) {
+    const cur = useEditor.getState().shapes[id];
+    if (!cur) return;
+    useEditor.getState().upsertShape({ ...cur, ...patch } as Shape);
+    if (id.startsWith("tmp-")) return;
+    await supabase.from("shapes").update(patch as any).eq("id", id);
+  }
+
+  async function deleteShape(id: string) {
+    useEditor.getState().removeShape(id);
+    if (id.startsWith("tmp-")) return;
+    await supabase.from("shapes").delete().eq("id", id);
   }
 
   async function createMeasurement(a: { x: number; y: number }, b: { x: number; y: number }) {
@@ -352,7 +603,11 @@ export function Editor({ initial }: { initial: InitialData }) {
       .select("*")
       .single();
     s.removeMeasurement(optimisticId);
-    if (!error && data) s.upsertMeasurement(data as any);
+    if (!error && data) {
+      s.upsertMeasurement(data as any);
+      const newId = (data as any).id as string;
+      pushUndo(() => deleteMeasurement(newId));
+    }
   }
 
   async function deleteMeasurement(id: string) {
@@ -396,7 +651,11 @@ export function Editor({ initial }: { initial: InitialData }) {
       .select("*")
       .single();
     useEditor.getState().removeNote(optimisticId);
-    if (!error && data) useEditor.getState().upsertNote(data as any);
+    if (!error && data) {
+      useEditor.getState().upsertNote(data as any);
+      const newId = (data as any).id as string;
+      pushUndo(() => deleteNote(newId));
+    }
   }
 
   async function deleteNote(id: string) {
@@ -433,7 +692,9 @@ export function Editor({ initial }: { initial: InitialData }) {
     setCalibratePending(null);
   }
 
-  function onSelectionPick(sel: { kind: "measurement" | "placed"; id: string } | null) {
+  function onSelectionPick(
+    sel: { kind: "measurement" | "placed" | "shape"; id: string } | null,
+  ) {
     useEditor.getState().setSelection(sel);
   }
 
@@ -486,6 +747,8 @@ export function Editor({ initial }: { initial: InitialData }) {
     if (!error && data) {
       useEditor.getState().upsertPlacedItem(data as PlacedItem);
       useEditor.getState().setSelection({ kind: "placed", id: (data as any).id });
+      const newId = (data as any).id as string;
+      pushUndo(() => deletePlacedItem(newId));
     }
   }
 
@@ -595,6 +858,7 @@ export function Editor({ initial }: { initial: InitialData }) {
     // takes over for rendering.
     if (detected === "dwg") {
       setDwgConverting(true);
+      setUploadStatus({ name: file.name, phase: "processing" });
       try {
         const { convertDwgToDxf } = await import("@/lib/utils/dwg");
         const dxf = await convertDwgToDxf(file);
@@ -603,6 +867,7 @@ export function Editor({ initial }: { initial: InitialData }) {
             "Could not convert this DWG. Try saving it as DXF in your CAD app and dropping that instead.",
           );
           setDwgConverting(false);
+          setUploadStatus(null);
           return;
         }
         blob = dxf;
@@ -612,6 +877,8 @@ export function Editor({ initial }: { initial: InitialData }) {
         setDwgConverting(false);
       }
     }
+
+    setUploadStatus({ name: fileName, phase: "uploading" });
 
     const layerId = crypto.randomUUID();
     // If the page already has a primary, every new file becomes an
@@ -794,6 +1061,22 @@ export function Editor({ initial }: { initial: InitialData }) {
           </div>
         ) : null}
 
+        {uploadStatus && !dwgConverting ? (
+          <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2">
+            <div className="flex items-center gap-2 rounded-md border border-border bg-panel px-3 py-2 shadow-md">
+              <div className="size-4 shrink-0 animate-spin rounded-full border-2 border-ink border-r-transparent" />
+              <div className="text-xs">
+                <span className="text-ink-muted">
+                  {uploadStatus.phase === "uploading" ? "Uploading " : "Processing "}
+                </span>
+                <span className="font-num text-ink">{uploadStatus.name}</span>
+              </div>
+            </div>
+            {/* Skeleton placeholder where the drawing will appear */}
+            <div className="mx-auto mt-3 h-40 w-72 animate-pulse rounded-md border border-dashed border-border bg-panel-muted/60" />
+          </div>
+        ) : null}
+
         <AttachmentsPanel
           pageId={initial.page.id}
           orgId={initial.orgId}
@@ -839,6 +1122,54 @@ export function Editor({ initial }: { initial: InitialData }) {
           open={assistantOpen}
           onClose={() => setAssistantOpen(false)}
           pageId={initial.page.id}
+          onApplyActions={async (actions) => {
+            for (const a of actions) {
+              try {
+                if (a.name === "add_note") {
+                  await createNote({ x: Number(a.input.x), y: Number(a.input.y) });
+                  // patch text on the just-created note
+                  const last = Object.values(useEditor.getState().notes)
+                    .sort(
+                      (x, y) =>
+                        new Date(y.created_at).getTime() -
+                        new Date(x.created_at).getTime(),
+                    )[0];
+                  if (last && a.input.text) {
+                    await updateNote({ ...last, text: String(a.input.text) });
+                  }
+                } else if (a.name === "add_measurement") {
+                  await createMeasurement(
+                    { x: Number(a.input.ax), y: Number(a.input.ay) },
+                    { x: Number(a.input.bx), y: Number(a.input.by) },
+                  );
+                } else if (a.name === "add_shape") {
+                  await createShape({
+                    kind: (a.input.kind || "rect") as any,
+                    x: Number(a.input.x),
+                    y: Number(a.input.y),
+                    w: Number(a.input.w),
+                    h: Number(a.input.h),
+                    text: a.input.text || undefined,
+                  });
+                  // Apply optional stroke/fill/stroke_width on the shape we just made.
+                  const last = Object.values(useEditor.getState().shapes).sort(
+                    (x, y) =>
+                      new Date(y.created_at).getTime() -
+                      new Date(x.created_at).getTime(),
+                  )[0];
+                  if (last) {
+                    const patch: any = {};
+                    if (a.input.stroke) patch.stroke = a.input.stroke;
+                    if (a.input.fill) patch.fill = a.input.fill;
+                    if (a.input.stroke_width) patch.stroke_width = a.input.stroke_width;
+                    if (Object.keys(patch).length > 0) await updateShape(last.id, patch);
+                  }
+                }
+              } catch (err) {
+                console.error("[trace] failed to apply action", a, err);
+              }
+            }
+          }}
         />
       </div>
       <Inspector
@@ -850,6 +1181,8 @@ export function Editor({ initial }: { initial: InitialData }) {
         onDeleteMeasurement={deleteMeasurement}
         onUpdatePlacedItem={updatePlacedItem}
         onChangePlacedItemZ={changePlacedItemZ}
+        onUpdateShape={updateShape}
+        onDeleteShape={deleteShape}
         onExportPng={exportPng}
         onDeleteSelection={() => {
           const sel = useEditor.getState().selection;

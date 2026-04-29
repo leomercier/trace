@@ -4,19 +4,29 @@ import { useEffect, useRef, useState } from "react";
 import { X, Send, Sparkles, Camera, Loader2 } from "lucide-react";
 import { useEditor } from "@/stores/editorStore";
 
+export interface AgentAction {
+  id: string;
+  name: string;
+  input: any;
+}
+
 interface Message {
   role: "user" | "assistant";
   content: string;
+  actions?: AgentAction[];
+  applied?: boolean;
 }
 
 export function AssistantDrawer({
   open,
   onClose,
   pageId,
+  onApplyActions,
 }: {
   open: boolean;
   onClose: () => void;
   pageId: string;
+  onApplyActions?: (actions: AgentAction[]) => Promise<void> | void;
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -103,7 +113,11 @@ export function AssistantDrawer({
       } else {
         setMessages([
           ...newMessages,
-          { role: "assistant", content: json.reply || "(no response)" },
+          {
+            role: "assistant",
+            content: json.reply || (json.actions?.length ? "Proposed changes ↓" : "(no response)"),
+            actions: json.actions || [],
+          },
         ]);
       }
     } catch {
@@ -161,7 +175,24 @@ export function AssistantDrawer({
 
         <div ref={messagesRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
           {messages.map((m, i) => (
-            <Bubble key={i} m={m} />
+            <Bubble
+              key={i}
+              m={m}
+              onApply={async (msg) => {
+                if (!onApplyActions || !msg.actions?.length) return;
+                await onApplyActions(msg.actions);
+                setMessages((cur) =>
+                  cur.map((x) => (x === msg ? { ...x, applied: true } : x)),
+                );
+              }}
+              onDiscard={(msg) => {
+                setMessages((cur) =>
+                  cur.map((x) =>
+                    x === msg ? { ...x, actions: [], applied: false } : x,
+                  ),
+                );
+              }}
+            />
           ))}
           {loading ? (
             <div className="flex items-center gap-2 text-ink-muted">
@@ -217,7 +248,15 @@ export function AssistantDrawer({
   );
 }
 
-function Bubble({ m }: { m: Message }) {
+function Bubble({
+  m,
+  onApply,
+  onDiscard,
+}: {
+  m: Message;
+  onApply?: (m: Message) => void;
+  onDiscard?: (m: Message) => void;
+}) {
   return (
     <div
       className={`flex gap-2.5 ${m.role === "user" ? "flex-row-reverse" : "flex-row"}`}
@@ -235,8 +274,47 @@ function Bubble({ m }: { m: Message }) {
           m.role === "user" ? "bg-ink text-white" : "bg-panel-muted text-ink"
         }`}
       >
-        {m.content}
+        <div>{m.content}</div>
+        {m.actions && m.actions.length > 0 ? (
+          <div className="mt-2 space-y-1.5 rounded-md border border-border bg-panel p-2 text-ink">
+            <div className="text-[10px] uppercase tracking-wider text-ink-faint">
+              Proposed changes ({m.actions.length})
+            </div>
+            <ul className="space-y-1">
+              {m.actions.map((a) => (
+                <li key={a.id} className="font-num text-[11px] text-ink-muted">
+                  {summariseAction(a)}
+                </li>
+              ))}
+            </ul>
+            {!m.applied ? (
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => onApply?.(m)}
+                  className="rounded border border-ink bg-ink px-2 py-1 text-[11px] font-medium text-white"
+                >
+                  Apply
+                </button>
+                <button
+                  onClick={() => onDiscard?.(m)}
+                  className="rounded border border-border px-2 py-1 text-[11px] text-ink-muted hover:text-ink"
+                >
+                  Discard
+                </button>
+              </div>
+            ) : (
+              <div className="text-[10px] text-ink-faint">Applied</div>
+            )}
+          </div>
+        ) : null}
       </div>
     </div>
   );
+}
+
+function summariseAction(a: AgentAction): string {
+  if (a.name === "add_note") return `Note "${a.input?.text}"`;
+  if (a.name === "add_measurement") return `Measure ${a.input?.label || "—"}`;
+  if (a.name === "add_shape") return `${a.input?.kind || "shape"}`;
+  return a.name;
 }

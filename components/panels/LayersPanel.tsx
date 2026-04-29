@@ -139,7 +139,7 @@ export function LayersPanel({
               Annotations
             </div>
             <ul className="space-y-1">
-              {(["measurements", "notes", "items", "cursors"] as const).map((k) => (
+              {(["measurements", "notes", "items", "shapes", "cursors"] as const).map((k) => (
                 <li
                   key={k}
                   className="flex items-center gap-2 rounded px-2 py-2 text-sm hover:bg-panel-muted"
