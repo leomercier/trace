@@ -37,7 +37,9 @@ export interface EditorState {
   // tools
   tool: Tool;
   draft: { tool: Tool; start: Pt; end: Pt } | null;
-  selection: { kind: "measurement" | "note" | "placed" | "shape"; id: string } | null;
+  selection:
+    | { kind: "measurement" | "note" | "placed" | "shape" | "drawing"; id: string }
+    | null;
   // Additional placed-item selections (multi-select). The primary item lives
   // in `selection`; these are siblings.
   multiSelection: Set<string>;
@@ -106,6 +108,11 @@ export interface EditorState {
   removeDrawing: (id: string) => void;
   toggleDrawing: (id: string) => void;
   renameDrawing: (id: string, name: string) => void;
+  setDrawingTransform: (
+    id: string,
+    t: Partial<Pick<Drawing, "x" | "y" | "scale" | "rotation">>,
+  ) => void;
+  setDrawingLocked: (id: string, locked: boolean) => void;
   upsertCursor: (c: RemoteCursor) => void;
   removeCursor: (userId: string) => void;
   toggleLayer: (k: keyof EditorState["layers"]) => void;
@@ -125,10 +132,115 @@ export interface Drawing {
   id: string;            // "primary" for legacy single-source, otherwise page_drawings.id
   name: string;
   fileType: string;
-  entities: ParsedEntity[];
-  bounds: Bounds;
+  entities: ParsedEntity[];   // native (un-transformed) coords from the parser
+  bounds: Bounds;             // native bounds
   visible: boolean;
   sortOrder: number;
+  // Per-drawing transform (origin = drawing's natural centre).
+  // Defaults are identity so untouched drawings render unchanged.
+  x: number;          // translate x
+  y: number;          // translate y
+  scale: number;      // uniform scale, default 1
+  rotation: number;   // degrees, default 0
+  locked: boolean;    // when true, can't be moved/resized/rotated/deleted
+}
+
+/**
+ * Apply a drawing's transform (translate around natural centre, scale,
+ * rotate) to a single entity. Returns a fresh entity in world coords —
+ * used both for rendering (DrawingLayer) and for the snap index so that
+ * vertices stay snappable after the user moves a layer.
+ */
+export function transformEntity(e: ParsedEntity, d: Drawing): ParsedEntity {
+  const s = d.scale || 1;
+  const r = ((d.rotation || 0) * Math.PI) / 180;
+  const cos = Math.cos(r);
+  const sin = Math.sin(r);
+  const cx = (d.bounds.minX + d.bounds.maxX) / 2;
+  const cy = (d.bounds.minY + d.bounds.maxY) / 2;
+  const tx = d.x || 0;
+  const ty = d.y || 0;
+  const tp = (px: number, py: number) => {
+    const lx = (px - cx) * s;
+    const ly = (py - cy) * s;
+    return {
+      x: cx + cos * lx - sin * ly + tx,
+      y: cy + sin * lx + cos * ly + ty,
+    };
+  };
+  switch (e.kind) {
+    case "line": {
+      const a = tp(e.ax, e.ay);
+      const b = tp(e.bx, e.by);
+      return { kind: "line", ax: a.x, ay: a.y, bx: b.x, by: b.y, color: e.color };
+    }
+    case "polyline": {
+      const out = new Array(e.points.length);
+      for (let i = 0; i < e.points.length; i += 2) {
+        const p = tp(e.points[i], e.points[i + 1]);
+        out[i] = p.x;
+        out[i + 1] = p.y;
+      }
+      return { kind: "polyline", points: out, color: e.color, closed: e.closed };
+    }
+    case "circle": {
+      const c = tp(e.cx, e.cy);
+      return { kind: "circle", cx: c.x, cy: c.y, r: e.r * s, color: e.color };
+    }
+    case "arc": {
+      const c = tp(e.cx, e.cy);
+      return {
+        kind: "arc",
+        cx: c.x,
+        cy: c.y,
+        r: e.r * s,
+        start: e.start + r,
+        end: e.end + r,
+        color: e.color,
+      };
+    }
+    case "text": {
+      const p = tp(e.x, e.y);
+      return { kind: "text", x: p.x, y: p.y, size: e.size * s, text: e.text, color: e.color };
+    }
+    case "image": {
+      // Translate + scale around the drawing's natural centre. Rotation on
+      // raster images isn't supported by DrawingLayer's sprite renderer
+      // today; we keep the image axis-aligned and only apply translate +
+      // scale here. (Ship a dedicated sprite container in a follow-up.)
+      const p = tp(e.x + e.w / 2, e.y + e.h / 2);
+      const w = e.w * s;
+      const h = e.h * s;
+      return { kind: "image", x: p.x - w / 2, y: p.y - h / 2, w, h, src: e.src };
+    }
+  }
+}
+
+/**
+ * World-space axis-aligned bounding box of a drawing after transform.
+ * Used for the selection outline + hit testing (we hit-test in the
+ * drawing's local frame so rotation works correctly — see worldToLocal
+ * below).
+ */
+export function drawingWorldBounds(d: Drawing): Bounds {
+  const s = d.scale || 1;
+  const cx = (d.bounds.minX + d.bounds.maxX) / 2;
+  const cy = (d.bounds.minY + d.bounds.maxY) / 2;
+  const w = (d.bounds.maxX - d.bounds.minX) * s;
+  const h = (d.bounds.maxY - d.bounds.minY) * s;
+  const r = ((d.rotation || 0) * Math.PI) / 180;
+  const cos = Math.abs(Math.cos(r));
+  const sin = Math.abs(Math.sin(r));
+  const aabbW = w * cos + h * sin;
+  const aabbH = w * sin + h * cos;
+  const wcx = cx + (d.x || 0);
+  const wcy = cy + (d.y || 0);
+  return {
+    minX: wcx - aabbW / 2,
+    minY: wcy - aabbH / 2,
+    maxX: wcx + aabbW / 2,
+    maxY: wcy + aabbH / 2,
+  };
 }
 
 function recomputeEntities(drawings: Record<string, Drawing>): {
@@ -143,13 +255,17 @@ function recomputeEntities(drawings: Record<string, Drawing>): {
     maxY = -Infinity;
   for (const d of ordered) {
     if (!d.visible) continue;
-    entities.push(...d.entities);
-    if (d.bounds) {
-      if (d.bounds.minX < minX) minX = d.bounds.minX;
-      if (d.bounds.minY < minY) minY = d.bounds.minY;
-      if (d.bounds.maxX > maxX) maxX = d.bounds.maxX;
-      if (d.bounds.maxY > maxY) maxY = d.bounds.maxY;
+    const identity = !d.x && !d.y && (d.scale || 1) === 1 && !(d.rotation || 0);
+    if (identity) {
+      entities.push(...d.entities);
+    } else {
+      for (const e of d.entities) entities.push(transformEntity(e, d));
     }
+    const wb = drawingWorldBounds(d);
+    if (wb.minX < minX) minX = wb.minX;
+    if (wb.minY < minY) minY = wb.minY;
+    if (wb.maxX > maxX) maxX = wb.maxX;
+    if (wb.maxY > maxY) maxY = wb.maxY;
   }
   const bounds =
     minX !== Infinity ? { minX, minY, maxX, maxY } : null;
@@ -270,6 +386,27 @@ export const useEditor = create<EditorState>((set) => ({
       const cur = s.drawings[id];
       if (!cur) return {};
       return { drawings: { ...s.drawings, [id]: { ...cur, name } } };
+    }),
+  setDrawingTransform: (id, t) =>
+    set((s) => {
+      const cur = s.drawings[id];
+      if (!cur) return {};
+      const next: Drawing = {
+        ...cur,
+        x: t.x ?? cur.x,
+        y: t.y ?? cur.y,
+        scale: t.scale ?? cur.scale,
+        rotation: t.rotation ?? cur.rotation,
+      };
+      const drawings = { ...s.drawings, [id]: next };
+      const { entities, bounds } = recomputeEntities(drawings);
+      return { drawings, entities, bounds: bounds ?? s.bounds };
+    }),
+  setDrawingLocked: (id, locked) =>
+    set((s) => {
+      const cur = s.drawings[id];
+      if (!cur) return {};
+      return { drawings: { ...s.drawings, [id]: { ...cur, locked } } };
     }),
   upsertCursor: (c) =>
     set((s) => ({ cursors: { ...s.cursors, [c.userId]: c } })),

@@ -5,6 +5,7 @@ import * as PIXI from "pixi.js";
 import { useEditor } from "@/stores/editorStore";
 import { Viewport } from "./pixi/Viewport";
 import { DrawingLayer } from "./pixi/DrawingLayer";
+import { DrawingSelectionLayer } from "./pixi/DrawingSelectionLayer";
 import { MeasurementLayer } from "./pixi/MeasurementLayer";
 import { CursorLayer } from "./pixi/CursorLayer";
 import { GridLayer } from "./pixi/GridLayer";
@@ -27,11 +28,15 @@ export function Canvas({
   onItemMoveEnd,
   onMeasurementLabelMove,
   onMeasurementLabelMoveEnd,
+  onDrawingMove,
+  onDrawingResize,
+  onDrawingRotate,
+  onDrawingMoveEnd,
 }: {
   onPointerWorld?: (p: { x: number; y: number; snapped: boolean }) => void;
   onClickWorld?: (p: { x: number; y: number; snapped: boolean }) => void;
   onSelectionPick?: (
-    sel: { kind: "measurement" | "placed" | "shape"; id: string } | null,
+    sel: { kind: "measurement" | "placed" | "shape" | "drawing"; id: string } | null,
   ) => void;
   onCanvasReady?: (api: CanvasHandle) => void;
   onItemMove?: (id: string, x: number, y: number) => void;
@@ -40,6 +45,10 @@ export function Canvas({
   onItemMoveEnd?: (id: string) => void;
   onMeasurementLabelMove?: (id: string, dx: number, dy: number) => void;
   onMeasurementLabelMoveEnd?: (id: string) => void;
+  onDrawingMove?: (id: string, x: number, y: number) => void;
+  onDrawingResize?: (id: string, scale: number) => void;
+  onDrawingRotate?: (id: string, rotation: number) => void;
+  onDrawingMoveEnd?: (id: string) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<{
@@ -47,6 +56,7 @@ export function Canvas({
     viewport: Viewport;
     gridLayer: GridLayer;
     drawingLayer: DrawingLayer;
+    drawingSelLayer: DrawingSelectionLayer;
     measureLayer: MeasurementLayer;
     placedLayer: PlacedItemsLayer;
     shapesLayer: ShapesLayer;
@@ -84,12 +94,14 @@ export function Canvas({
       const gridLayer = new GridLayer(viewport);
       gridLayer.setSize(rect.width, rect.height);
       const drawingLayer = new DrawingLayer();
+      const drawingSelLayer = new DrawingSelectionLayer(viewport);
       const placedLayer = new PlacedItemsLayer(viewport);
       const shapesLayer = new ShapesLayer(viewport);
       const measureLayer = new MeasurementLayer(viewport);
       const cursorLayer = new CursorLayer(viewport);
       viewport.world.addChild(gridLayer);
       viewport.world.addChild(drawingLayer);
+      viewport.world.addChild(drawingSelLayer);
       viewport.world.addChild(placedLayer);
       viewport.world.addChild(shapesLayer);
       viewport.world.addChild(measureLayer);
@@ -104,6 +116,7 @@ export function Canvas({
         viewport,
         gridLayer,
         drawingLayer,
+        drawingSelLayer,
         placedLayer,
         shapesLayer,
         measureLayer,
@@ -164,10 +177,21 @@ export function Canvas({
       if (state.entities !== prev.entities) {
         a.drawingLayer.render(state.entities);
         a.snap.build(state.entities);
-        if (state.bounds) {
+        if (state.bounds && state.entitiesLoaded && !prev.entitiesLoaded) {
           a.viewport.fitTo(state.bounds);
           pushView();
         }
+      }
+      if (
+        state.drawings !== prev.drawings ||
+        state.selection !== prev.selection ||
+        state.view !== prev.view
+      ) {
+        const sel =
+          state.selection?.kind === "drawing"
+            ? state.drawings[state.selection.id] || null
+            : null;
+        a.drawingSelLayer.render(sel);
       }
       if (state.bounds !== prev.bounds && state.bounds) {
         a.viewport.fitTo(state.bounds);
@@ -316,6 +340,26 @@ export function Canvas({
           startDy: number;
         }
       | null = null;
+    let drawingDrag:
+      | {
+          mode: "move" | "resize" | "rotate";
+          id: string;
+          startWorld: { x: number; y: number };
+          start: {
+            x: number;
+            y: number;
+            scale: number;
+            rotation: number;
+            // distance and angle from the drawing's centre in world coords at
+            // the start of the drag — used to compute uniform scale/rotation
+            // deltas without snapback.
+            startDist: number;
+            startAngle: number;
+            cx: number;
+            cy: number;
+          };
+        }
+      | null = null;
     const PAN_TOOLS = new Set(["pan"]);
 
     const SNAP_PX = 8;
@@ -369,6 +413,37 @@ export function Canvas({
         const world = a!.viewport.screenToWorld(sx, sy);
         const items = Object.values(state.placedItems);
         const realPerUnit = state.scale?.realPerUnit ?? null;
+
+        // Drawing handle drag (only when a drawing is the current selection
+        // and the drawing isn't locked). Handles render outside the
+        // drawing's bbox, so test these *before* the bbox hit-tests below.
+        if (state.selection?.kind === "drawing") {
+          const sel = state.drawings[state.selection.id];
+          if (sel && !sel.locked) {
+            const handle = a!.drawingSelLayer.hitHandle(sel, world.x, world.y);
+            if (handle) {
+              const cx = (sel.bounds.minX + sel.bounds.maxX) / 2 + (sel.x || 0);
+              const cy = (sel.bounds.minY + sel.bounds.maxY) / 2 + (sel.y || 0);
+              drawingDrag = {
+                mode: handle,
+                id: sel.id,
+                startWorld: world,
+                start: {
+                  x: sel.x || 0,
+                  y: sel.y || 0,
+                  scale: sel.scale || 1,
+                  rotation: sel.rotation || 0,
+                  startDist: Math.hypot(world.x - cx, world.y - cy) || 1,
+                  startAngle: Math.atan2(world.y - cy, world.x - cx),
+                  cx,
+                  cy,
+                },
+              };
+              canvas.setPointerCapture(e.pointerId);
+              return;
+            }
+          }
+        }
 
         // Measurement label drag (highest priority — labels render on top).
         const labelHit = a!.measureLayer.hitLabel(world.x, world.y);
@@ -446,6 +521,36 @@ export function Canvas({
           canvas.setPointerCapture(e.pointerId);
           return;
         }
+
+        // Plain click on a drawing (lowest priority — only if nothing else
+        // was hit). Selecting a drawing always starts a move drag unless
+        // it's locked.
+        const drawings = Object.values(state.drawings);
+        const dHit = a!.drawingSelLayer.hitTest(drawings, world.x, world.y);
+        if (dHit) {
+          const d = state.drawings[dHit];
+          onSelectionPick?.({ kind: "drawing", id: dHit });
+          if (!d || d.locked) return;
+          const cx = (d.bounds.minX + d.bounds.maxX) / 2 + (d.x || 0);
+          const cy = (d.bounds.minY + d.bounds.maxY) / 2 + (d.y || 0);
+          drawingDrag = {
+            mode: "move",
+            id: dHit,
+            startWorld: world,
+            start: {
+              x: d.x || 0,
+              y: d.y || 0,
+              scale: d.scale || 1,
+              rotation: d.rotation || 0,
+              startDist: Math.hypot(world.x - cx, world.y - cy) || 1,
+              startAngle: Math.atan2(world.y - cy, world.x - cx),
+              cx,
+              cy,
+            },
+          };
+          canvas.setPointerCapture(e.pointerId);
+          return;
+        }
       }
 
       if (isPan || (tool === "select" && e.button === 0)) {
@@ -470,6 +575,30 @@ export function Canvas({
           labelDrag.startDx + dx,
           labelDrag.startDy + dy,
         );
+        return;
+      }
+
+      if (drawingDrag) {
+        const world = a!.viewport.screenToWorld(sx, sy);
+        const s = drawingDrag.start;
+        if (drawingDrag.mode === "move") {
+          const dx = world.x - drawingDrag.startWorld.x;
+          const dy = world.y - drawingDrag.startWorld.y;
+          onDrawingMove?.(drawingDrag.id, s.x + dx, s.y + dy);
+        } else if (drawingDrag.mode === "resize") {
+          const distNow = Math.hypot(world.x - s.cx, world.y - s.cy);
+          const factor = distNow / s.startDist;
+          const next = Math.max(0.05, s.scale * factor);
+          onDrawingResize?.(drawingDrag.id, next);
+        } else if (drawingDrag.mode === "rotate") {
+          const angleNow = Math.atan2(world.y - s.cy, world.x - s.cx);
+          let degrees =
+            s.rotation + ((angleNow - s.startAngle) * 180) / Math.PI;
+          if (e.shiftKey) degrees = Math.round(degrees / 15) * 15;
+          // Normalise to (-180, 180]
+          degrees = ((degrees + 540) % 360) - 180;
+          onDrawingRotate?.(drawingDrag.id, degrees);
+        }
         return;
       }
 
@@ -531,9 +660,11 @@ export function Canvas({
       const wasDragging = dragging;
       const wasItemDrag = itemDrag;
       const wasLabelDrag = labelDrag;
+      const wasDrawingDrag = drawingDrag;
       dragging = false;
       itemDrag = null;
       labelDrag = null;
+      drawingDrag = null;
       try { canvas.releasePointerCapture(e.pointerId); } catch {}
 
       if (wasLabelDrag) {
@@ -542,6 +673,10 @@ export function Canvas({
       }
       if (wasItemDrag) {
         onItemMoveEnd?.(wasItemDrag.id);
+        return;
+      }
+      if (wasDrawingDrag) {
+        onDrawingMoveEnd?.(wasDrawingDrag.id);
         return;
       }
 

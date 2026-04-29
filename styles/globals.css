@@ -63,6 +63,15 @@ body.trace-in-editor .org-top-bar {
   display: none !important;
 }
 
+/* Editor route is a fixed viewport — no document scroll. */
+body.trace-in-editor,
+html:has(body.trace-in-editor) {
+  overflow: hidden;
+  height: 100vh;
+  height: 100dvh;
+  overscroll-behavior: none;
+}
+
 /* Hide focus rings on mouse but keep for keyboard */
 :focus:not(:focus-visible) {
   outline: none;

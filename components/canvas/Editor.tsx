@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Canvas, type CanvasHandle } from "./Canvas";
 import { NotesOverlay } from "./NotesOverlay";
 import { Toolbar } from "@/components/panels/Toolbar";
@@ -53,6 +54,7 @@ interface InitialData {
 
 export function Editor({ initial }: { initial: InitialData }) {
   const supabase = createClient();
+  const router = useRouter();
   const canvasApi = useRef<CanvasHandle | null>(null);
   const [calibrateOpen, setCalibrateOpen] = useState(false);
   const [calibrateLength, setCalibrateLength] = useState(0);
@@ -274,6 +276,11 @@ export function Editor({ initial }: { initial: InitialData }) {
       name: string;
       sortOrder: number;
       visible: boolean;
+      x?: number;
+      y?: number;
+      scale?: number;
+      rotation?: number;
+      locked?: boolean;
     }) {
       // Best-effort: a missing/unknown type shouldn't break the whole
       // page. Try to recover by re-inferring from the filename, and if
@@ -317,6 +324,11 @@ export function Editor({ initial }: { initial: InitialData }) {
         bounds: parsed.bounds,
         visible: args.visible,
         sortOrder: args.sortOrder,
+        x: Number(args.x ?? 0),
+        y: Number(args.y ?? 0),
+        scale: Number(args.scale ?? 1) || 1,
+        rotation: Number(args.rotation ?? 0),
+        locked: !!args.locked,
       });
       return parsed;
     }
@@ -355,6 +367,11 @@ export function Editor({ initial }: { initial: InitialData }) {
           name: d.file_name || "Layer",
           sortOrder: d.sort_order ?? 1,
           visible: d.visible,
+          x: Number((d as any).x ?? 0),
+          y: Number((d as any).y ?? 0),
+          scale: Number((d as any).scale ?? 1) || 1,
+          rotation: Number((d as any).rotation ?? 0),
+          locked: !!(d as any).locked,
         });
       }
     })().catch((err) => {
@@ -779,9 +796,36 @@ export function Editor({ initial }: { initial: InitialData }) {
   }
 
   function onSelectionPick(
-    sel: { kind: "measurement" | "placed" | "shape"; id: string } | null,
+    sel:
+      | { kind: "measurement" | "placed" | "shape" | "drawing"; id: string }
+      | null,
   ) {
     useEditor.getState().setSelection(sel);
+  }
+
+  // ============= Drawing transforms =============
+  function onDrawingMove(id: string, x: number, y: number) {
+    useEditor.getState().setDrawingTransform(id, { x, y });
+  }
+  function onDrawingResize(id: string, scale: number) {
+    useEditor.getState().setDrawingTransform(id, { scale });
+  }
+  function onDrawingRotate(id: string, rotation: number) {
+    useEditor.getState().setDrawingTransform(id, { rotation });
+  }
+  async function onDrawingMoveEnd(id: string) {
+    const d = useEditor.getState().drawings[id];
+    if (!d) return;
+    if (id === "primary") return; // legacy primary has no page_drawings row
+    await supabase
+      .from("page_drawings")
+      .update({ x: d.x, y: d.y, scale: d.scale, rotation: d.rotation })
+      .eq("id", id);
+  }
+  async function setDrawingLocked(id: string, locked: boolean) {
+    useEditor.getState().setDrawingLocked(id, locked);
+    if (id === "primary") return;
+    await supabase.from("page_drawings").update({ locked }).eq("id", id);
   }
 
   // ============= Placed items =============
@@ -1080,6 +1124,21 @@ export function Editor({ initial }: { initial: InitialData }) {
     await supabase.from("pages").update({ name }).eq("id", initial.page.id);
   }
 
+  async function newPage() {
+    if (initial.role === "viewer") return;
+    const nextName = `Page ${(initial.pages?.length ?? 0) + 1}`;
+    const { data, error } = await supabase
+      .from("pages")
+      .insert({ project_id: initial.projectId, name: nextName })
+      .select("id")
+      .single();
+    if (error || !data) {
+      alert(`Couldn't create page: ${error?.message ?? "unknown error"}`);
+      return;
+    }
+    router.push(`/app/${initial.orgSlug}/${initial.projectId}/${data.id}`);
+  }
+
   return (
     <div className="flex h-screen w-full flex-col">
       <div className="hidden md:block">
@@ -1119,11 +1178,21 @@ export function Editor({ initial }: { initial: InitialData }) {
       />
       <LayersPanel
         canEdit={initial.role !== "viewer"}
+        canAdmin={initial.role === "owner" || initial.role === "admin"}
         mobileOpen={mobileLayersOpen}
         onMobileClose={() => setMobileLayersOpen(false)}
         onUpload={onUploadFile}
         onSetVisible={setDrawingVisible}
+        onSetLocked={setDrawingLocked}
+        onSelect={(id) => onSelectionPick({ kind: "drawing", id })}
         onDelete={deleteDrawing}
+        orgSlug={initial.orgSlug}
+        projectId={initial.projectId}
+        projectName={initial.projectName}
+        currentPageId={initial.page.id}
+        pages={initial.pages}
+        onNewPage={newPage}
+        onDeletePage={onDeletePage}
       />
       <div className="relative min-w-0 flex-1">
         <Canvas
@@ -1135,6 +1204,10 @@ export function Editor({ initial }: { initial: InitialData }) {
           onItemResize={onItemResize}
           onItemRotate={onItemRotate}
           onItemMoveEnd={onItemMoveEnd}
+          onDrawingMove={onDrawingMove}
+          onDrawingResize={onDrawingResize}
+          onDrawingRotate={onDrawingRotate}
+          onDrawingMoveEnd={onDrawingMoveEnd}
           onMeasurementLabelMove={(id, dx, dy) => {
             const m = useEditor.getState().measurements[id];
             if (!m) return;
