@@ -18,9 +18,16 @@ export function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Prefer the live origin so OAuth/magic-link redirects return to the
+  // same browser/host that started the flow. PKCE stores the code
+  // verifier as a cookie on the origin that initiated the request — if
+  // the redirect lands on a different host (preview URL vs. canonical,
+  // localhost vs. Vercel), the cookie isn't sent and exchangeCodeForSession
+  // fails with "PKCE code verifier not found in storage".
   const origin =
+    (typeof window !== "undefined" ? window.location.origin : "") ||
     process.env.NEXT_PUBLIC_APP_URL ||
-    (typeof window !== "undefined" ? window.location.origin : "");
+    "";
   const redirectTo = origin
     ? `${origin}/auth/callback?next=${encodeURIComponent(next)}${
         inviteToken ? `&invite=${encodeURIComponent(inviteToken)}` : ""

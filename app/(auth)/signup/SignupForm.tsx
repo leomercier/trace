@@ -32,9 +32,12 @@ export function SignupForm() {
   }
 
   const next = "/app";
+  // Same origin as the form, not the canonical APP_URL — see LoginForm
+  // for the full PKCE-cookie reasoning.
   const origin =
+    (typeof window !== "undefined" ? window.location.origin : "") ||
     process.env.NEXT_PUBLIC_APP_URL ||
-    (typeof window !== "undefined" ? window.location.origin : "");
+    "";
   const redirectTo = origin
     ? `${origin}/auth/callback?next=${encodeURIComponent(next)}${
         inviteToken ? `&invite=${encodeURIComponent(inviteToken)}` : ""

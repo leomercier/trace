@@ -59,9 +59,9 @@ function friendlyAuthError(raw: string) {
   const msg = raw.toLowerCase();
   if (msg.includes("pkce") || msg.includes("code verifier")) {
     return {
-      headline: "Couldn't sign you in from that link",
+      headline: "Couldn't complete that sign-in",
       body:
-        "The link must be opened in the same browser where you requested it. Send a fresh link below and click it from this browser, or scan the QR if you switch devices.",
+        "The browser session that started the flow is missing — usually because the redirect landed on a different host than the page you started from, or because cookies were cleared mid-flow. Try again below; if it keeps happening, sign in from the same URL you intend to use (don't mix preview and production URLs).",
     };
   }
   if (msg.includes("expired")) {
