@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { X, Send, Sparkles, Camera, Loader2 } from "lucide-react";
 import { useEditor } from "@/stores/editorStore";
+import { EVENTS, track } from "@/lib/analytics";
 
 export interface AgentAction {
   id: string;
@@ -34,6 +35,11 @@ export function AssistantDrawer({
   const messagesRef = useRef<HTMLDivElement>(null);
 
   // Initialise greeting based on current canvas state
+  useEffect(() => {
+    if (!open) return;
+    track(EVENTS.aiAssistantOpen);
+  }, [open]);
+
   useEffect(() => {
     if (!open || messages.length > 0) return;
     const s = useEditor.getState();
@@ -87,6 +93,7 @@ export function AssistantDrawer({
   async function send(prompt?: string) {
     const text = (prompt ?? input).trim();
     if (!text || loading) return;
+    track(EVENTS.aiAssistantPrompt, { length: text.length });
     const userMsg: Message = { role: "user", content: text };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);

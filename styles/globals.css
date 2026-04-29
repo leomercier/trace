@@ -56,6 +56,22 @@ button {
   height: 100%;
 }
 
+/* Pan-tool cursor swap: hand-grab when idle, hand-grabbing while drag.
+   We track the dragging state from JS via the .is-dragging class so the
+   cursor flips even when pointer capture is held by the inner canvas. */
+.pixi-host[data-tool="pan"] {
+  cursor: grab;
+}
+.pixi-host[data-tool="pan"].is-dragging,
+.pixi-host[data-tool="pan"]:active {
+  cursor: grabbing;
+}
+/* For non-pan tools, dragging an item / label / shape still feels better
+   with a grabbing cursor. */
+.pixi-host.is-dragging {
+  cursor: grabbing;
+}
+
 /* Inside the editor route, suppress the org-level top bars — the editor
    provides its own thin bar with hamburger + actions + profile. */
 body.trace-in-editor .org-mobile-bar,

@@ -19,29 +19,19 @@ import type {
 import { createClient } from "@/lib/supabase/client";
 import { parseFile, inferFileType } from "./parsers";
 import { Button } from "@/components/ui/Button";
-import {
-  Check,
-  Copy,
-  Download,
-  LogOut,
-  Maximize2,
-  Package,
-  Share2,
-  Sparkles,
-  Upload,
-} from "lucide-react";
-import { useRouter } from "next/navigation";
+import { Upload } from "lucide-react";
 import { TraceWordmark } from "@/components/marketing/TraceLogo";
 import { ShareDialog } from "@/components/panels/ShareDialog";
 import { AttachmentsPanel } from "@/components/panels/AttachmentsPanel";
 import { EditorMobileBar } from "@/components/panels/EditorMobileBar";
-import { EditorTopBar } from "@/components/panels/EditorTopBar";
 import { LayersPanel } from "@/components/panels/LayersPanel";
+import { EditorActions } from "@/components/panels/EditorActions";
 import { InventoryDrawer } from "@/components/inventory/InventoryDrawer";
 import { AssistantDrawer } from "@/components/assistant/AssistantDrawer";
 import { idbCacheGet, idbCacheSet, hashBlob } from "@/lib/utils/idb";
+import { EVENTS, identify, track } from "@/lib/analytics";
 import { subscribePage, broadcastCursor, broadcastDraft } from "@/lib/realtime/page";
-import { Avatar, stringToColor } from "@/components/ui/Avatar";
+import { stringToColor } from "@/components/ui/Avatar";
 import type { Bounds } from "@/lib/utils/geometry";
 
 interface InitialData {
@@ -255,6 +245,17 @@ export function Editor({ initial }: { initial: InitialData }) {
     document.body.classList.add("trace-in-editor");
     return () => document.body.classList.remove("trace-in-editor");
   }, []);
+
+  // Tag the analytics user once per session. Cheap and idempotent.
+  useEffect(() => {
+    identify(initial.user.id, {
+      org_id: initial.orgId,
+      role: initial.role,
+      anonymous: initial.orgIsAnonymous,
+    });
+    track(EVENTS.projectOpen, { role: initial.role });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial.user.id, initial.orgId]);
 
   // boot store
   useEffect(() => {
@@ -660,6 +661,7 @@ export function Editor({ initial }: { initial: InitialData }) {
     if (data) {
       useEditor.getState().upsertShape(data as Shape);
       pushUndo(() => deleteShape(id));
+      track(EVENTS.shapeCreate, { kind: args.kind });
     }
   }
 
@@ -716,6 +718,7 @@ export function Editor({ initial }: { initial: InitialData }) {
     if (data) {
       s.upsertMeasurement(data as any);
       pushUndo(() => deleteMeasurement(id));
+      track(EVENTS.measurementCreate);
     }
   }
 
@@ -769,6 +772,7 @@ export function Editor({ initial }: { initial: InitialData }) {
     if (data) {
       useEditor.getState().upsertNote(data as any);
       pushUndo(() => deleteNote(id));
+      track(EVENTS.noteCreate);
     }
   }
 
@@ -802,6 +806,7 @@ export function Editor({ initial }: { initial: InitialData }) {
       .from("pages")
       .update({ scale_real_per_unit: realPerUnit, scale_unit: unit })
       .eq("id", initial.page.id);
+    track(EVENTS.scaleCalibrated, { unit });
     setCalibrateOpen(false);
     setCalibratePending(null);
   }
@@ -867,6 +872,7 @@ export function Editor({ initial }: { initial: InitialData }) {
     if (data) {
       useEditor.getState().upsertPlacedItem(data as PlacedItem);
       pushUndo(() => deletePlacedItem(id));
+      track(EVENTS.itemPlace, { item_name: inv.name, brand: inv.brand || null });
     }
   }
 
@@ -972,7 +978,7 @@ export function Editor({ initial }: { initial: InitialData }) {
 
     if (detected === "other") {
       alert(
-        `Couldn't add "${file.name}". Trace supports DWG, DXF, PDF, SVG, PNG, JPG, GIF, WEBP, BMP.`,
+        `Couldn't add "${file.name}". tracable supports DWG, DXF, PDF, SVG, PNG, JPG, GIF, WEBP, BMP.`,
       );
       return;
     }
@@ -993,7 +999,7 @@ export function Editor({ initial }: { initial: InitialData }) {
               "The browser-side converter only supports DWG files saved in AutoCAD R12–R2018 formats. " +
               "Newer 2019+ files often fail.\n\n" +
               "Easiest fix: in your CAD app, Save As → DXF (any version) or Export as PDF. " +
-              "Drop that file instead — both render natively in Trace.",
+              "Drop that file instead — both render natively in tracable.",
           );
           setDwgConverting(false);
           setUploadStatus(null);
@@ -1026,6 +1032,7 @@ export function Editor({ initial }: { initial: InitialData }) {
       alert("Upload failed: " + error.message);
       return;
     }
+    track(EVENTS.drawingUpload, { file_type: detected, primary: isPrimary });
     if (isPrimary) {
       await supabase
         .from("pages")
@@ -1144,6 +1151,7 @@ export function Editor({ initial }: { initial: InitialData }) {
     a.href = url;
     a.download = `${initial.page.name}.png`;
     a.click();
+    track(EVENTS.exportPng);
   }
 
   async function renamePage(name: string) {
@@ -1164,26 +1172,6 @@ export function Editor({ initial }: { initial: InitialData }) {
           </div>
         </div>
       ) : null}
-      {/* Floating corner controls — replaces the old EditorTopBar. The
-          left + right docked panels (LayersPanel + Inspector) are the
-          primary chrome on desktop; on mobile the bottom toolbar +
-          slide-overs handle everything. */}
-      <FloatingControls
-        org={{
-          id: initial.orgId,
-          slug: initial.orgSlug,
-          isAnonymous: initial.orgIsAnonymous,
-          expiresAt: initial.orgExpiresAt,
-        }}
-        user={initial.user}
-        role={initial.role}
-        presence={presence}
-        canEdit={initial.role !== "viewer"}
-        canAdmin={initial.role === "owner" || initial.role === "admin"}
-        onInventory={() => setInventoryOpen(true)}
-        onAssistant={() => setAssistantOpen(true)}
-        onShare={() => setShareOpen(true)}
-      />
       <div className="flex min-h-0 w-full flex-1 flex-col md:flex-row">
       <EditorMobileBar
         orgSlug={initial.orgSlug}
@@ -1205,6 +1193,20 @@ export function Editor({ initial }: { initial: InitialData }) {
         onUpload={onUploadFile}
         onSetVisible={setDrawingVisible}
         onDelete={deleteDrawing}
+        onDeletePlacedItem={deletePlacedItem}
+        onDeleteShape={deleteShape}
+        onDeleteNote={deleteNote}
+        page={{
+          orgSlug: initial.orgSlug,
+          projectId: initial.projectId,
+          projectName: initial.projectName,
+          currentPageId: initial.page.id,
+          currentPageName: initial.page.name,
+          pages: initial.pages,
+          canAdmin: initial.role === "owner" || initial.role === "admin",
+          onDeletePage,
+          onRenamePage: renamePage,
+        }}
       />
       <div className="relative min-w-0 flex-1">
         <Canvas
@@ -1380,6 +1382,23 @@ export function Editor({ initial }: { initial: InitialData }) {
         mobileOpen={mobileInspectorOpen}
         onMobileClose={() => setMobileInspectorOpen(false)}
         onRename={renamePage}
+        headerActions={
+          <EditorActions
+            org={{
+              id: initial.orgId,
+              slug: initial.orgSlug,
+              isAnonymous: initial.orgIsAnonymous,
+              expiresAt: initial.orgExpiresAt,
+            }}
+            user={initial.user}
+            presence={presence}
+            canEdit={initial.role !== "viewer"}
+            canAdmin={initial.role === "owner" || initial.role === "admin"}
+            onInventory={() => setInventoryOpen(true)}
+            onAssistant={() => setAssistantOpen(true)}
+            onShare={() => setShareOpen(true)}
+          />
+        }
         onRenameMeasurement={renameMeasurement}
         onDeleteMeasurement={deleteMeasurement}
         onUpdatePlacedItem={updatePlacedItem}
@@ -1415,237 +1434,6 @@ function useEditorCanEdit() {
   return useEditor((s) => s.canEdit);
 }
 
-function FloatingControls({
-  org,
-  user,
-  role,
-  presence,
-  canEdit,
-  canAdmin,
-  onInventory,
-  onAssistant,
-  onShare,
-}: {
-  org: { id: string; slug: string; isAnonymous: boolean; expiresAt: string | null };
-  user: { id: string; email: string; name: string; avatar: string | null };
-  role: "owner" | "admin" | "editor" | "viewer";
-  presence: { userId: string; name: string; color: string }[];
-  canEdit: boolean;
-  canAdmin: boolean;
-  onInventory: () => void;
-  onAssistant: () => void;
-  onShare: () => void;
-}) {
-  const supabase = createClient();
-  const router = useRouter();
-  const [profileOpen, setProfileOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const profileRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!profileOpen) return;
-    const onClick = (e: Event) => {
-      if (!profileRef.current?.contains(e.target as any)) setProfileOpen(false);
-    };
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("touchstart", onClick);
-    return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("touchstart", onClick);
-    };
-  }, [profileOpen]);
-
-  function copyShareUrl() {
-    if (typeof window === "undefined") return;
-    navigator.clipboard
-      .writeText(window.location.href)
-      .then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      })
-      .catch(() => {});
-  }
-
-  const others = presence.filter((p) => p.userId !== user.id);
-
-  return (
-    <div
-      className="pointer-events-none fixed right-3 z-30 flex items-center gap-2 top-16 md:top-3"
-      style={{ paddingTop: "env(safe-area-inset-top)" }}
-    >
-      {org.isAnonymous ? (
-        <button
-          onClick={copyShareUrl}
-          title="Copy public link — anyone with this URL can collaborate"
-          className="pointer-events-auto flex h-9 items-center gap-1.5 rounded-md border border-yellow-200 bg-yellow-50 px-2.5 text-xs text-yellow-900 shadow-sm hover:border-yellow-300"
-        >
-          {copied ? <Check size={13} /> : <Copy size={13} />}
-          <span>{copied ? "Copied" : org.expiresAt ? `Sandbox · ${daysLeft(org.expiresAt)}` : "Sandbox"}</span>
-        </button>
-      ) : null}
-      {canEdit ? (
-        <button
-          onClick={onInventory}
-          title="Inventory (⌘I)"
-          className="pointer-events-auto flex h-9 items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 text-xs shadow-sm hover:border-border-strong"
-        >
-          <Package size={13} /> <span className="hidden md:inline">Inventory</span>
-        </button>
-      ) : null}
-      <button
-        onClick={onAssistant}
-        title="Ask AI (⌘K)"
-        className="pointer-events-auto flex h-9 items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 text-xs shadow-sm hover:border-border-strong"
-        style={{ color: "#7c3aed" }}
-      >
-        <Sparkles size={13} /> <span className="hidden md:inline">Ask AI</span>
-      </button>
-      {others.length > 0 ? (
-        <div className="pointer-events-auto hidden items-center md:flex">
-          <div className="flex -space-x-2">
-            {others.slice(0, 4).map((u) => (
-              <div key={u.userId} className="rounded-full border-2 border-bg" title={u.name}>
-                <Avatar name={u.name} color={u.color} size={24} />
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-      {canAdmin ? (
-        <button
-          onClick={onShare}
-          className="pointer-events-auto flex h-9 items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 text-xs shadow-sm hover:border-border-strong"
-        >
-          <Share2 size={13} /> <span className="hidden md:inline">Share</span>
-        </button>
-      ) : null}
-      <div ref={profileRef} className="pointer-events-auto relative">
-        <button
-          onClick={() => setProfileOpen((v) => !v)}
-          className="flex items-center rounded-full p-0.5 hover:bg-panel-muted"
-          aria-label="Profile"
-        >
-          <Avatar name={user.name} src={user.avatar} size={28} />
-        </button>
-        {profileOpen ? (
-          <div className="absolute right-0 top-full mt-1 w-60 rounded-md border border-border bg-panel p-1 shadow-lg">
-            <div className="px-3 py-2 text-xs text-ink-faint">
-              {user.email || "Anonymous session"}
-            </div>
-            {org.isAnonymous ? (
-              <a
-                href="/signup"
-                className="mx-1 mb-1 block rounded bg-ink px-3 py-2 text-sm text-white hover:bg-black/90"
-              >
-                Sign in to keep this workspace
-              </a>
-            ) : null}
-            <a
-              href="/app"
-              className="block rounded px-3 py-2 text-sm hover:bg-panel-muted"
-            >
-              Switch workspace
-            </a>
-            <button
-              onClick={async () => {
-                setProfileOpen(false);
-                if (
-                  !confirm(
-                    "Duplicate this workspace including all projects, pages, and annotations?",
-                  )
-                )
-                  return;
-                const res = await fetch("/api/orgs/duplicate", {
-                  method: "POST",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify({ source_org_id: org.id }),
-                });
-                const json = await res.json();
-                if (!res.ok) {
-                  alert(json.error || "Duplicate failed");
-                  return;
-                }
-                window.location.href = `/app/${json.org.slug}`;
-              }}
-              className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-panel-muted"
-            >
-              <Copy size={14} /> Duplicate workspace
-            </button>
-            {canAdmin ? (
-              <a
-                href={`/app/${org.slug}/settings`}
-                className="block rounded px-3 py-2 text-sm hover:bg-panel-muted"
-              >
-                Workspace settings
-              </a>
-            ) : null}
-            <button
-              onClick={async () => {
-                await supabase.auth.signOut();
-                router.push("/");
-                router.refresh();
-              }}
-              className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-panel-muted"
-            >
-              <LogOut size={14} /> Sign out
-            </button>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function daysLeft(iso: string): string {
-  const ms = new Date(iso).getTime() - Date.now();
-  if (ms <= 0) return "expired";
-  const days = Math.ceil(ms / (24 * 3600 * 1000));
-  return days === 1 ? "1d" : `${days}d`;
-}
-
-function PresenceStack({
-  users,
-  me,
-}: {
-  users: { userId: string; name: string; color: string }[];
-  me: string;
-}) {
-  const others = users.filter((u) => u.userId !== me);
-  if (others.length === 0) return null;
-  return (
-    <div className="flex -space-x-2">
-      {others.slice(0, 5).map((u) => (
-        <div
-          key={u.userId}
-          className="rounded-full border-2 border-bg"
-          title={u.name}
-        >
-          <Avatar name={u.name} color={u.color} size={28} />
-        </div>
-      ))}
-      {others.length > 5 ? (
-        <span className="ml-2 self-center text-xs text-ink-muted">+{others.length - 5}</span>
-      ) : null}
-    </div>
-  );
-}
-
-function UploadButton({ onUpload }: { onUpload: (f: File) => void }) {
-  return (
-    <label className="flex h-9 cursor-pointer items-center gap-1.5 rounded-md border border-border bg-panel px-3 text-sm hover:border-border-strong">
-      <Upload size={14} /> Replace
-      <input
-        type="file"
-        className="hidden"
-        
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) onUpload(f);
-        }}
-      />
-    </label>
-  );
-}
 
 /**
  * Non-blocking drop target. Always listens for file drops on the whole canvas

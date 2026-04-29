@@ -29,6 +29,7 @@ export function Inspector({
   onUpdateDrawing,
   onExportPng,
   scaleControls,
+  headerActions,
   mobileOpen,
   onMobileClose,
 }: {
@@ -47,6 +48,7 @@ export function Inspector({
   ) => void;
   onExportPng: () => void;
   scaleControls: React.ReactNode;
+  headerActions?: React.ReactNode;
   mobileOpen?: boolean;
   onMobileClose?: () => void;
 }) {
@@ -62,7 +64,6 @@ export function Inspector({
   const setGridSize = useEditor((s) => s.setGridSize);
   const canEdit = useEditor((s) => s.canEdit);
 
-  const [name, setName] = useState(pageName);
   const measurementList = Object.values(measurements).sort(
     (a, b) =>
       new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
@@ -109,19 +110,7 @@ export function Inspector({
           </button>
         </div>
       ) : null}
-      <div className="border-b border-border p-4">
-        <div className="text-xs uppercase tracking-wider text-ink-faint">Page</div>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onBlur={() => {
-            if (name && name !== pageName) onRename(name);
-          }}
-          disabled={!canEdit}
-          className="mt-1 w-full bg-transparent font-serif text-xl outline-none disabled:text-ink-muted"
-        />
-      </div>
-
+      {headerActions ? <div className="shrink-0">{headerActions}</div> : null}
       <div className="border-b border-border p-4">
         <div className="text-xs uppercase tracking-wider text-ink-faint">Scale</div>
         {scale ? (

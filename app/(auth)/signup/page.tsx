@@ -3,7 +3,7 @@ import Link from "next/link";
 import { SignupForm } from "./SignupForm";
 import { AuthShell } from "@/components/marketing/AuthShell";
 
-export const metadata = { title: "Sign up — trace" };
+export const metadata = { title: "Sign up — tracable" };
 export const dynamic = "force-dynamic";
 
 export default function SignupPage() {
@@ -19,7 +19,7 @@ export default function SignupPage() {
         </>
       }
       intro="Create a workspace and invite your team. Free for everyone, forever."
-      footer={<>MIT licensed · Self-host or hosted · No credit card</>}
+      footer={<>Open source · Self-host or hosted · No credit card</>}
     >
       <Suspense fallback={<div className="h-40" />}>
         <SignupForm />

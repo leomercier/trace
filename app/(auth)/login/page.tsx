@@ -3,7 +3,7 @@ import Link from "next/link";
 import { LoginForm } from "./LoginForm";
 import { AuthShell } from "@/components/marketing/AuthShell";
 
-export const metadata = { title: "Sign in — trace" };
+export const metadata = { title: "Sign in — tracable" };
 export const dynamic = "force-dynamic";
 
 export default function LoginPage({
@@ -26,7 +26,7 @@ export default function LoginPage({
         </>
       }
       intro="Sign in to your workspace. Magic link or Google — your call."
-      footer={<>MIT licensed · Open source · Self-host or hosted</>}
+      footer={<>Open source · Self-host or hosted</>}
     >
       {friendlyError ? (
         <div className="mb-6 rounded-md border border-trace-error/40 bg-trace-error/5 p-4 text-sm">
@@ -42,7 +42,7 @@ export default function LoginPage({
       </Suspense>
 
       <p className="mt-8 text-sm text-trace-black/70">
-        New to trace?{" "}
+        New to tracable?{" "}
         <Link
           href="/signup"
           className="font-medium text-trace-black underline underline-offset-4 decoration-trace-black/40 hover:decoration-trace-black"

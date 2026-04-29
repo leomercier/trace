@@ -5,6 +5,7 @@ import { Copy, Check, Trash2 } from "lucide-react";
 import { Dialog } from "@/components/ui/Dialog";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
+import { EVENTS, track } from "@/lib/analytics";
 
 export function ShareDialog({
   open,
@@ -48,6 +49,7 @@ export function ShareDialog({
         allow_comments: allowComments,
       }),
     });
+    track(EVENTS.share, { scope, password: Boolean(password), allow_comments: allowComments });
     setPassword("");
     setAllowComments(false);
     await refresh();
@@ -62,6 +64,7 @@ export function ShareDialog({
   function copyUrl(slug: string) {
     const url = `${window.location.origin}/p/${slug}`;
     navigator.clipboard.writeText(url);
+    track(EVENTS.shareCopy);
     setCopiedSlug(slug);
     setTimeout(() => setCopiedSlug(null), 1500);
   }

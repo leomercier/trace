@@ -27,10 +27,10 @@ export async function generateMetadata({
     .eq("slug", params.slug)
     .maybeSingle();
   if (!share) {
-    return { title: "trace — shared workspace" };
+    return { title: "tracable — shared workspace" };
   }
-  let title = "trace — shared workspace";
-  let description = "Open source design and prototyping. Anyone with this link can collaborate.";
+  let title = "tracable — shared workspace";
+  let description = "Open-source design and prototyping. Anyone with this link can collaborate.";
   if (share.scope === "page" && share.page_id) {
     const { data: page } = await svc
       .from("pages")
@@ -38,9 +38,9 @@ export async function generateMetadata({
       .eq("id", share.page_id)
       .maybeSingle();
     const pageName = page?.name || "Untitled page";
-    const projectName = (page as any)?.projects?.name || "trace";
+    const projectName = (page as any)?.projects?.name || "tracable";
     title = `${pageName} · ${projectName}`;
-    description = `Shared on trace · ${projectName}`;
+    description = `Shared on tracable · ${projectName}`;
   } else if (share.scope === "project" && share.project_id) {
     const { data: project } = await svc
       .from("projects")
@@ -100,7 +100,7 @@ export default async function PublicSharePage({
       <header className="sticky top-0 z-30 border-b border-border bg-bg/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
           <Link href="/" className="font-serif text-xl">
-            trace
+            tracable
           </Link>
           <span className="rounded bg-panel px-2 py-0.5 text-[11px] uppercase tracking-wider text-ink-muted">
             Shared link

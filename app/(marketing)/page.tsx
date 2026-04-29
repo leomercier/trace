@@ -92,8 +92,8 @@ function SectionWhite() {
             full visibility.
           </h1>
           <p className="mt-8 max-w-md text-lg text-trace-black/70">
-            trace is the open source design and prototyping tool that exposes
-            structure and logic, so teams can build better products.
+            tracable is the open-source design and prototyping tool that
+            exposes structure and logic, so teams can build better products.
           </p>
           <div className="mt-10 flex flex-wrap items-center gap-3">
             <Link
@@ -122,7 +122,7 @@ function SectionWhite() {
           </p>
 
           <dl className="mt-16 grid max-w-md grid-cols-3 gap-px border-y border-trace-black/10">
-            <Stat label="License" value="MIT" />
+            <Stat label="License" value="OSS · NC" />
             <Stat label="Hosting" value="Self or us" />
             <Stat label="Price" value="Free" />
           </dl>
@@ -133,7 +133,7 @@ function SectionWhite() {
         </div>
       </div>
 
-      <FootRule index="01" caption="trace · Brand Kit v1.0" />
+      <FootRule index="01" caption="tracable · Brand Kit v1.0" />
     </section>
   );
 }
@@ -168,8 +168,8 @@ function SectionOrange() {
             decision.
           </h2>
           <p className="mt-8 max-w-md text-lg text-trace-white/80">
-            trace makes the structure behind your product explicit, so you can
-            design, understand, and ship with confidence. Every component,
+            tracable makes the structure behind your product explicit, so you
+            can design, understand, and ship with confidence. Every component,
             every token, every connection — visible.
           </p>
 
@@ -263,7 +263,7 @@ function SectionPink() {
             you can trace.
           </h2>
           <p className="mt-8 max-w-md text-lg text-trace-black/80">
-            Open source design and prototyping for teams who care about
+            Open-source design and prototyping for teams who care about
             clarity. Run our hosted version, or clone the repo and deploy it
             on your own infrastructure.
           </p>
@@ -295,7 +295,7 @@ function SectionPink() {
           <HostCard
             title="Sandbox"
             body="One click. No signup. Workspace expires in 7 days — sign in to keep it."
-            cta="trace.app/new"
+            cta="tracable.dev/new"
             href="/new"
             primary
           />
@@ -308,7 +308,7 @@ function SectionPink() {
           <HostCard
             title="Self-host"
             body="Clone the repo. Point at your own Supabase + Vercel. Your data, your servers."
-            cta="git clone trace"
+            cta="git clone tracable"
             href={GITHUB_URL}
           />
         </div>
@@ -396,8 +396,8 @@ function SectionPlum() {
             Paths, nodes, layers, fragments.
           </h3>
           <p className="mt-4 max-w-xl text-trace-white/70">
-            Four primitives. Every visual in trace is built from them — never
-            decoration for its own sake.
+            Four primitives. Every visual in tracable is built from them —
+            never decoration for its own sake.
           </p>
           <div className="mt-10">
             <GraphicLanguage />
@@ -469,7 +469,7 @@ function Footer() {
         <div>
           <TraceWordmark />
           <p className="mt-3 max-w-xs text-sm text-trace-black/60">
-            Open source design and prototyping. MIT licensed.
+            Open source design and prototyping. Source-available license.
           </p>
         </div>
         <FooterCol
@@ -492,7 +492,7 @@ function Footer() {
         <FooterCol
           heading="Open source"
           links={[
-            ["License (MIT)", GITHUB_URL],
+            ["License", `${GITHUB_URL}/blob/main/LICENSE`],
             ["Self-host guide", GITHUB_URL],
             ["Issues", `${GITHUB_URL}/issues`],
           ]}

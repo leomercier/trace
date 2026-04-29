@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { NewClient } from "./NewClient";
 
-export const metadata = { title: "New workspace — Trace" };
+export const metadata = { title: "New workspace — tracable" };
 export const dynamic = "force-dynamic";
 
 /**
@@ -18,7 +18,7 @@ export default function NewPage() {
     <main className="min-h-screen bg-bg">
       <header className="mx-auto flex max-w-4xl items-center justify-between px-6 py-6">
         <Link href="/" className="font-serif text-2xl">
-          trace
+          tracable
         </Link>
         <Link
           href="/login"

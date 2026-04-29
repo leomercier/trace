@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/Button";
 import { Input, Label } from "@/components/ui/Input";
+import { EVENTS, track } from "@/lib/analytics";
 
 export function LoginForm() {
   const supabase = createClient();
@@ -36,11 +37,15 @@ export function LoginForm() {
     });
     setLoading(false);
     if (error) setError(error.message);
-    else setSent(true);
+    else {
+      track(EVENTS.login, { method: "magic_link" });
+      setSent(true);
+    }
   }
 
   async function onGoogle() {
     setError(null);
+    track(EVENTS.login, { method: "google" });
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo },

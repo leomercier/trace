@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Menu, Check, Plus, ChevronLeft, Settings, LogOut, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { EVENTS, track } from "@/lib/analytics";
 
 interface PageRow {
   id: string;
@@ -56,6 +57,7 @@ export function PageMenu({
       .select("id, name")
       .single();
     if (error || !data) return;
+    track(EVENTS.pageCreate);
     setPages([...pages, data]);
     router.push(`/app/${orgSlug}/${projectId}/${data.id}`);
   }

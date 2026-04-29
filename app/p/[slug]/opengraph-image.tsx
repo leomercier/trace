@@ -4,13 +4,13 @@ import { createServiceClient } from "@/lib/supabase/server";
 /**
  * Open Graph share card for /p/{slug}. Generated dynamically per-share so
  * the link in Slack/iMessage/etc shows the project and page name. Rendered
- * in trace's brand palette via @vercel/og under the hood — no Pixi or
+ * in tracable's brand palette via @vercel/og under the hood — no Pixi or
  * client JS, just SVG/HTML primitives that Next can rasterise on the edge.
  */
 export const runtime = "nodejs";
 export const contentType = "image/png";
 export const size = { width: 1200, height: 630 };
-export const alt = "trace — shared workspace";
+export const alt = "tracable — shared workspace";
 
 export default async function OpenGraphImage({
   params,
@@ -24,7 +24,7 @@ export default async function OpenGraphImage({
     .eq("slug", params.slug)
     .maybeSingle();
 
-  let title = "trace";
+  let title = "tracable";
   let subtitle = "Shared workspace";
   if (share?.scope === "page" && share.page_id) {
     const { data: page } = await svc
@@ -78,7 +78,7 @@ export default async function OpenGraphImage({
               borderRadius: 999,
             }}
           />
-          trace · shared workspace
+          tracable · shared workspace
         </div>
 
         <div
@@ -121,7 +121,7 @@ export default async function OpenGraphImage({
             color: "rgba(11, 13, 16, 0.6)",
           }}
         >
-          <span>Open source · MIT</span>
+          <span>Open source · Source-available</span>
           <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 16 }}>
             /p/{params.slug}
           </span>

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Input, Label, Textarea } from "@/components/ui/Input";
 import { createClient } from "@/lib/supabase/client";
+import { EVENTS, track } from "@/lib/analytics";
 
 export function NewProjectButton({ orgId, orgSlug }: { orgId: string; orgSlug: string }) {
   const supabase = createClient();
@@ -31,6 +32,7 @@ export function NewProjectButton({ orgId, orgSlug }: { orgId: string; orgSlug: s
       setError(error.message);
       return;
     }
+    track(EVENTS.projectCreate, { has_description: Boolean(description) });
     setOpen(false);
     router.push(`/app/${orgSlug}/${data!.id}`);
     router.refresh();

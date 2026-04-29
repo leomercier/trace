@@ -25,7 +25,7 @@ const Body = z.object({
 
 export const runtime = "nodejs";
 
-const SYSTEM = `You are Trace, an AI assistant embedded in a CAD/floor-plan tool. The user is working in a browser canvas with a calibrated drawing.
+const SYSTEM = `You are the tracable AI assistant, embedded in a CAD/floor-plan tool. The user is working in a browser canvas with a calibrated drawing.
 
 You can see the canvas via images and you have structured context about what's on the page (counts of measurements, names of placed items, calibration scale).
 

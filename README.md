@@ -1,270 +1,289 @@
-# Trace
+# tracable
 
-A free, browser-based collaborative canvas for measuring and annotating drawings.
-Drop a DWG, DXF, PDF, SVG, PNG or JPG, calibrate the scale, and place
-measurements that snap to entity endpoints. Invite teammates as editors or
-viewers — see each other's cursors live. Share a password-protected link with
-anyone, no account required.
+A browser-based collaborative canvas for measuring, annotating, and
+sharing technical drawings — DWG, DXF, PDF, SVG, PNG, JPG, GIF, WEBP,
+BMP. Drop a floor plan, calibrate it to real units, place items from
+your inventory, leave sticky notes, and ship a marked-up version to a
+client over a password-protected link. No accounts required for the
+sandbox; full multi-tenant orgs for paid teams.
 
-Built with Next.js 14 (App Router), TypeScript, Tailwind, Supabase (auth, DB,
-storage, realtime), PixiJS v8, Zustand, Resend.
+Live at **[tracable.dev](https://tracable.dev)**.
 
----
-
-## Quick start
-
-```bash
-bun install
-cp .env.example .env.local   # fill in the values, see "Environment" below
-bun dev
-```
-
-Open http://localhost:3000.
-
-To produce a production build: `bun run build`.
-To type-check only: `bun run typecheck`.
+> **License**: source-available under the **Elastic License 2.0** —
+> see [LICENSE](./LICENSE). You can self-host, modify, and use it
+> commercially in your own work; you cannot offer it as a hosted/SaaS
+> product to third parties or resell it as a cloud service.
 
 ---
 
-## Environment
+## What it does
 
-All variables and what they do:
-
-| Variable | Where used | Required | Notes |
-|---|---|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | client + server | yes | From Supabase project settings → API |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | client + server | yes | Anon key (public) |
-| `SUPABASE_SERVICE_ROLE_KEY` | server only | yes | Service role key — never expose to browser. Used by `/api/share/*` and invite acceptance to bypass RLS for verified callers. |
-| `NEXT_PUBLIC_APP_URL` | client + server | yes | The full origin, e.g. `https://trace.app`. Used in invite & share emails. |
-| `RESEND_API_KEY` | server | optional | If absent, invite emails are logged to the server console instead of sent. The accept-link is still copyable from the UI. |
-| `RESEND_FROM` | server | optional | Defaults to `Trace <onboarding@resend.dev>`. Set to your verified sender once your Resend domain is set up. |
-| `SHARE_COOKIE_SECRET` | server | yes | Long random string. Used to HMAC the public-share auth cookie. Rotate to invalidate all guest sessions. |
-
-`.env.example` is checked in.
-
----
-
-## Deployment
-
-### Supabase project setup
-
-1. Create a Supabase project.
-2. Run the migrations. Two options:
-
-   **Option A — automatic (recommended).** Set `SUPABASE_DB_URL` (the
-   direct Postgres connection string from Supabase → Project Settings →
-   Database → "Session pooler") in your Vercel project as a sensitive env
-   var. Vercel's build runs `bun run vercel-build` which calls
-   `bun run scripts/migrate.ts` *before* `next build`. The script:
-   - Creates a `_trace_migrations` tracking table on first run.
-   - Applies any `.sql` file in `supabase/migrations/` not yet recorded,
-     in filename order, each in its own transaction.
-   - Runs `supabase/seed.sql` at the end (idempotent — its first
-     statement clears the default rows).
-
-   You can also run it locally: `SUPABASE_DB_URL=... bun run migrate`.
-
-   **Option B — manual.** Open Supabase Studio → SQL Editor and paste
-   each file in order:
-   - `supabase/migrations/0001_init.sql` — schema
-   - `supabase/migrations/0002_rls.sql` — Row Level Security
-   - `supabase/migrations/0003_storage.sql` — storage buckets + policies
-   - `supabase/migrations/0004_inventory.sql` — inventory + AI usage tables
-   - `supabase/migrations/0005_notes_drawings.sql` — note styling + multi-file layers
-   - `supabase/migrations/0006_placed_lock.sql` — lock flag on placed items
-   - `supabase/migrations/0007_shapes.sql` — line / rectangle / text shapes
-   - `supabase/migrations/0008_measurement_label_offset.sql` — draggable measurement labels
-   - `supabase/seed.sql` — default furniture/fixtures inventory
-3. **Enable Realtime** for these tables (Database → Replication):
-   - `measurements`
-   - `notes`
-   - `pages`
-   - `placed_items`
-   - `page_drawings`
-4. **Authentication providers:**
-   - Email magic-link is enabled by default.
-   - Google: Authentication → Providers → Google. Add the OAuth client ID/secret
-     from Google Cloud Console. The redirect URI is
-     `https://YOUR-PROJECT.supabase.co/auth/v1/callback`.
-5. **Site URL & redirect URLs** (Authentication → URL Configuration). This
-   step is critical — get it wrong and your magic-link emails will contain
-   `http://localhost:3000` URLs that don't work for users:
-   - **Site URL**: set this to your **production URL** (e.g.
-     `https://trace.vercel.app`), not localhost. Supabase uses this as the
-     fallback whenever the `emailRedirectTo` we pass isn't in the allow-list
-     below, so a wrong value here silently breaks signup emails.
-   - **Additional Redirect URLs** — add ALL of these so the dev and prod flows
-     both work:
-     - `https://your-production-domain.com/auth/callback`
-     - `https://*-your-vercel-team.vercel.app/auth/callback` (preview deploys)
-     - `http://localhost:3000/auth/callback` (local dev)
-6. **Email templates** (Authentication → Email Templates). The default magic
-   link template uses `{{ .ConfirmationURL }}`, which routes through PKCE.
-   That requires the user to click the link in the **same browser** they
-   signed up in — open the email on your phone after signing up on desktop
-   and you'll get a `PKCE code verifier not found` error.
-   
-   **Recommended:** override the **Magic Link** and **Confirm signup**
-   templates to point straight at our `/auth/confirm` endpoint, which uses
-   the token-hash flow and works across browsers/devices:
-   
-   ```html
-   <h2>Sign in to Trace</h2>
-   <p>
-     <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email&next=/app">
-       Sign in
-     </a>
-   </p>
-   <p>If you didn't request this, you can ignore this email.</p>
-   ```
-   
-   Use `type=email` for magic-link / signup templates and `type=invite` for
-   the invite template if you customise that one too.
-
-### Vercel
-
-1. Import the repo into Vercel.
-2. Add all the environment variables from `.env.example` to the Vercel project.
-   `SUPABASE_SERVICE_ROLE_KEY` and `SHARE_COOKIE_SECRET` should be marked
-   sensitive.
-3. Deploy. The default `next build` works.
-4. Once deployed, update `NEXT_PUBLIC_APP_URL` to the production URL and the
-   Supabase redirect URLs to include the production `/auth/callback`.
-
-### Anthropic (optional but recommended)
-
-The AI assistant and AI product search are powered by Claude. Without
-`ANTHROPIC_API_KEY` the app still works — those two features just return a
-503 with a clear message.
-
-1. Create an Anthropic console account, generate an API key.
-2. Add it to Vercel as `ANTHROPIC_API_KEY` (sensitive). Optionally set
-   `ANTHROPIC_MODEL` (defaults to `claude-sonnet-4-5`).
-3. **Run `supabase/seed.sql`** after the migrations to populate the default
-   furniture/fixtures library — it's the inventory the user sees by default.
-
-### Resend (optional)
-
-1. Create a Resend account, verify your sending domain.
-2. Drop the API key into `RESEND_API_KEY` and set `RESEND_FROM`
-   (e.g. `Trace <invites@yourdomain.com>`).
-3. Without Resend the app still works — invites generate copyable links and the
-   email step is logged to the console.
+- **Drop a drawing**, any common 2D format. DWG is converted to DXF
+  in the browser at upload time so the rest of the pipeline only sees
+  DXF.
+- **Calibrate scale** by clicking two points and entering their real
+  distance. After that, every measurement is shown in mm/cm/m/in/ft.
+- **Measure** with snap-to-endpoint precision. Labels are draggable
+  so they don't overlap.
+- **Annotate** with sticky notes (rich-text, draggable, URL-aware),
+  shapes (line/rect/text), and pinned items from your inventory.
+- **Inventory** of furniture/fixtures with real dimensions; drag onto
+  the canvas at scale, rotate, resize, lock.
+- **Live collaboration**: cursors, draft lines, presence avatars in
+  the right panel.
+- **AI assistant** (Claude) embedded in the canvas — sees your page,
+  suggests measurements/items/notes you can accept with one click.
+- **Share** via password-protected public link. Guests can view and
+  optionally comment without making an account.
+- **Export** the canvas as PNG.
 
 ---
 
-## Architecture map
+## How it works (architecture)
+
+Trace is a Next.js 14 app with a single Pixi v8 canvas that renders
+the entire editor. State lives in a Zustand store; mutations are
+optimistic, then persisted to Supabase, with realtime postgres-changes
+roundtripping into the same store.
 
 ```
-app/
-  (marketing)/page.tsx          marketing landing
-  (auth)/login,signup           magic-link + Google OAuth
-  auth/callback/route.ts        OAuth + OTP code exchange
-  post-login/                   creates pending org after signup
-  app/                          app routes (auth-gated by middleware)
-  app/[orgSlug]/                org-scoped layout + projects list
-  app/[orgSlug]/settings/       members + invites
-  app/[orgSlug]/[projectId]/    pages list
+app/                       Next.js routes (App Router)
+  layout.tsx               Root layout — fonts + analytics
+  (marketing)/page.tsx     Marketing landing
+  (auth)/{login,signup}    Magic-link + Google OAuth
   app/[orgSlug]/[projectId]/[pageId]/  THE EDITOR
-  p/[slug]/                     public viewer (password gate + viewer)
-  api/
-    orgs/create                 create org and add owner
-    invites                     create / list invites + Resend email
-    invite/[token]              accept-invite redirect handler
-    members/[orgId]/[userId]    PATCH role / DELETE member
-    shares                      list/create public_shares
-    shares/[id]                 revoke share
-    share/[slug]/auth           public password gate (sets HMAC cookie)
-    share/[slug]/data           service-role data fetch for public viewer
+  p/[slug]/                Public viewer (password gate)
+  api/                     Server routes (orgs, invites, shares, AI)
 
 components/
-  canvas/
-    Canvas.tsx                  Pixi mount + interactions (pan, zoom, snap)
-    Editor.tsx                  Editor wrapper that wires data, store, realtime
-    NotesOverlay.tsx            HTML sticky notes (positioned via worldToScreen)
-    pixi/
-      Viewport.ts               pan/zoom/fit math
-      DrawingLayer.ts           renders parsed entities (lines, text, images)
-      MeasurementLayer.ts       red lines, dots, labels (counter-scaled)
-      CursorLayer.ts            remote-user cursors
-      Snapping.ts               grid-hash spatial index for endpoint snapping
-    parsers/
-      index.ts                  dispatch by file type, dynamic-imported
-      image.ts                  PNG/JPG/SVG → world image entity
-      pdf.ts                    pdfjs-dist render page 1 → texture
-      dxf.ts                    hand-rolled minimal DXF parser
-      dwg.ts                    TODO(trace): wire @mlightcad/libredwg-web
-  panels/
-    Toolbar.tsx                 floating tool buttons
-    Inspector.tsx               desktop right rail
-    MobileSheet.tsx             collapsing bottom sheet on mobile
-    CalibrateDialog.tsx         enter real length to set scale
-    ShareDialog.tsx             create + revoke public links
-    AttachmentsPanel.tsx        floating attachments drawer
+  canvas/Canvas.tsx        Pixi mount + interaction loop
+  canvas/Editor.tsx        Editor wrapper (data, store, realtime)
+  canvas/pixi/{*Layer}.ts  One file per Pixi layer
+  canvas/parsers/          DXF / PDF / image / DWG parsers
+  panels/Toolbar.tsx       Bottom-centre tools (V/H/M/N/T/L/R/C)
+  panels/LayersPanel.tsx   Left panel: page header + every asset type
+  panels/Inspector.tsx     Right panel: actions + selection properties
+  panels/EditorActions.tsx Inventory / AI / Share / Profile (right)
+  panels/EditorMobileBar.tsx  Mobile-only top bar
+  analytics/AnalyticsProvider.tsx  GA + Mixpanel bootstrap
 
-stores/editorStore.ts           Zustand store (view, tool, data, presence)
+stores/editorStore.ts      Zustand: drawings, items, shapes, notes,
+                           measurements, view, tool, selection,
+                           cursors, layers, grid
 
 lib/
-  supabase/{client,server,types}  per-context clients
-  realtime/page.ts              postgres_changes + broadcast + presence
-  email/send.ts                 Resend wrapper (silent in dev)
-  utils/{geometry,units,slug,password,date,cn,idb}
+  analytics/index.ts       track / identify / pageView
+  realtime/page.ts         postgres-changes + broadcast + presence
+  supabase/{client,server}.ts  Per-context clients
+  email/send.ts            Resend wrapper (silent in dev)
+  utils/                   geometry, units, idb cache, dwg, sanitiseSvg
 ```
 
 ### State + sync
 
-The editor mirrors all annotations into a Zustand store. Mutations are
-**optimistic**: write locally first, then upsert to Supabase. Postgres-changes
-events round-trip remote edits back into the same store, keyed by row UUID — so
-simultaneous edits to *different* rows never conflict, and same-row edits
-last-write-win. Cursors and in-progress draft lines go through Supabase
-Broadcast at ~30Hz; presence shows avatars in the top bar.
+- All annotations live in Zustand by row-UUID maps.
+- Mutations are **optimistic**: write to the store, then upsert to
+  Supabase. On error: surface and undo the local insert.
+- `lib/realtime/page.ts` subscribes to postgres-changes for the
+  page's measurements/notes/placed_items/shapes, plus broadcast
+  channels for cursors and in-progress draft lines.
+- Conflict resolution: last-write-wins per row UUID. Different rows
+  never conflict.
 
 ### Permissions
 
-Org roles: `owner | admin | editor | viewer`. RLS enforces them at the database
-level (see `0002_rls.sql`). The UI hides editing affordances for viewers but
-trusts RLS as the source of truth. Public shares bypass RLS only via the
-`/api/share/[slug]/*` server routes, which check a signed cookie issued after a
-correct password.
+- Org roles: `owner | admin | editor | viewer`. Source of truth is
+  Supabase RLS (`supabase/migrations/0002_rls.sql`).
+- The UI hides edit affordances for viewers but trusts RLS.
+- Public sharing: `app/api/share/[slug]/*` server routes bypass RLS
+  via the service-role key, gated by an HMAC cookie set after a
+  correct password.
 
 ### Drawing pipeline
 
-1. User drops a file → uploaded to Supabase Storage (`drawings` bucket).
-2. Page row records the path + file type.
-3. Editor fetches a signed URL, downloads the blob, hashes it, and looks the
-   parsed result up in IndexedDB.
-4. Cache miss → parse client-side (DWG → DXF → entities, PDF → image, etc.) and
-   store the parsed entities in IndexedDB.
-5. Pixi `DrawingLayer` renders the entities; `Snapping` builds a vertex
-   spatial index so the measure tool can snap to endpoints.
+1. User drops a file → uploaded to Supabase Storage (`drawings`
+   bucket).
+2. Page row records the path + file type (or, for additional layers,
+   a `page_drawings` row).
+3. Editor fetches a signed URL, downloads the blob, hashes it, and
+   looks the parsed result up in IndexedDB.
+4. Cache miss → parse client-side (DWG → DXF → entities, PDF →
+   image, etc.) and cache the parsed entities in IndexedDB.
+5. Pixi `DrawingLayer` renders the entities; `Snapping` builds a
+   vertex spatial index so the measure tool can snap to endpoints.
 
-### What's deferred (TODO(trace))
+---
 
-- DWG parsing: `@mlightcad/libredwg-web` integration. For v1 users export to
-  DXF/PDF.
-- DXF advanced entities: SPLINE, ELLIPSE, INSERT/blocks expansion, HATCH.
-- Multi-page PDFs: only page 1 is rendered today.
-- Yjs / CRDT for fine-grained conflict resolution.
-- Free-tier quotas (`usage_limits` stub table).
-- Thumbnails are not auto-generated yet (the `thumbnails` bucket exists).
+## Run it locally
+
+Prereqs: [Bun](https://bun.sh), a Supabase project.
+
+```bash
+bun install
+cp .env.example .env.local            # fill in the values, see below
+bun run dev                           # http://localhost:3000
+```
+
+### 1. Supabase
+
+Create a Supabase project, then either:
+
+**Option A — automatic.** Set `SUPABASE_DB_URL` (the direct
+connection string from Project Settings → Database → "Session
+pooler") and run:
+
+```bash
+SUPABASE_DB_URL=postgres://... bun run migrate
+```
+
+The script creates a `_trace_migrations` tracking table on first run,
+applies any new `.sql` file in `supabase/migrations/` in order, and
+runs `supabase/seed.sql` at the end (idempotent).
+
+**Option B — manual.** Open Supabase Studio → SQL Editor and paste:
+
+- `supabase/migrations/0001_init.sql` — schema
+- `supabase/migrations/0002_rls.sql` — Row Level Security
+- `supabase/migrations/0003_storage.sql` — storage buckets + policies
+- `supabase/migrations/0004_inventory.sql` — inventory + AI usage
+- `supabase/migrations/0005_notes_drawings.sql` — note styling +
+  multi-file layers
+- `supabase/migrations/0006_placed_lock.sql` — lock flag on items
+- `supabase/migrations/0007_shapes.sql` — line / rect / text shapes
+- `supabase/migrations/0008_measurement_label_offset.sql` — draggable
+  measurement labels
+- `supabase/seed.sql` — default furniture/fixtures inventory
+
+**Enable Realtime** for these tables (Database → Replication):
+
+- `measurements`, `notes`, `pages`, `placed_items`, `page_drawings`,
+  `shapes`
+
+**Auth providers** (Authentication → Providers):
+
+- Email magic-link is enabled by default.
+- Google: paste your OAuth client ID/secret. Redirect URI is
+  `https://YOUR-PROJECT.supabase.co/auth/v1/callback`.
+
+**Site URL & redirect URLs** (Authentication → URL Configuration):
+
+- **Site URL**: your **production URL** (e.g. `https://tracable.dev`),
+  not localhost. Supabase falls back to this when the
+  `emailRedirectTo` we pass isn't allowlisted, so a wrong value
+  silently breaks signup emails.
+- **Additional redirect URLs**:
+  - `https://tracable.dev/auth/callback`
+  - `https://*-your-vercel-team.vercel.app/auth/callback`
+  - `http://localhost:3000/auth/callback`
+
+**Email templates** (Authentication → Email Templates) — optional but
+recommended. Override the **Magic Link** and **Confirm signup**
+templates to point at our `/auth/confirm` endpoint, which uses the
+token-hash flow and works across browsers/devices:
+
+```html
+<h2>Sign in to tracable</h2>
+<p>
+  <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email&next=/app">
+    Sign in
+  </a>
+</p>
+<p>If you didn't request this, you can ignore this email.</p>
+```
+
+Use `type=email` for magic-link / signup, `type=invite` for invites.
+
+### 2. Environment
+
+| Variable | Where | Required | Notes |
+|---|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | client + server | yes | Project settings → API |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | client + server | yes | Anon key (public) |
+| `SUPABASE_SERVICE_ROLE_KEY` | server only | yes | Sensitive — never expose to browser |
+| `NEXT_PUBLIC_APP_URL` | client + server | yes | e.g. `https://tracable.dev` |
+| `SHARE_COOKIE_SECRET` | server | yes | Long random string. Rotates kill all guest sessions |
+| `RESEND_API_KEY` | server | optional | Without it, invites log to the console |
+| `RESEND_FROM` | server | optional | Defaults to `tracable <onboarding@resend.dev>` |
+| `ANTHROPIC_API_KEY` | server | optional | Without it, AI features show 503 |
+| `ANTHROPIC_MODEL` | server | optional | Defaults to `claude-sonnet-4-5` |
+| `NEXT_PUBLIC_GA_MEASUREMENT_ID` | client | optional | Google Analytics 4 ID |
+| `NEXT_PUBLIC_MIXPANEL_TOKEN` | client | optional | Mixpanel project token |
+
+`.env.example` is checked in.
+
+### 3. Deploying to Vercel
+
+1. Import the repo into Vercel.
+2. Add every variable from `.env.example` to the Vercel project.
+   Mark `SUPABASE_SERVICE_ROLE_KEY` and `SHARE_COOKIE_SECRET` as
+   sensitive.
+3. Set `SUPABASE_DB_URL` if you want migrations to run on every
+   deploy (the `vercel-build` script invokes `bun run migrate`
+   before `next build`).
+4. Once deployed, set `NEXT_PUBLIC_APP_URL` to the production URL and
+   add the production `/auth/callback` to the Supabase redirect
+   allowlist.
+
+---
+
+## Analytics
+
+Both Google Analytics (GA4) and Mixpanel are supported and **optional**.
+If neither env var is set, the app emits nothing.
+
+When configured, `<AnalyticsProvider />` mounts at the root layout,
+boots both providers lazily on the client, and emits `page_view` on
+every Next.js client navigation. Feature code calls
+`track(EVENTS.x, props?)` from `lib/analytics`. See `EVENTS` in
+[`lib/analytics/index.ts`](./lib/analytics/index.ts) for the canonical
+list (project_create, page_create, drawing_upload, item_place,
+ai_assistant_prompt, share_link_create, etc.).
+
+User identification uses the Supabase auth UUID — never the email or
+display name.
 
 ---
 
 ## Development notes
 
-- `bun run typecheck` — strict TypeScript.
+- `bun run typecheck` — strict TypeScript. Run before committing.
 - `bun run dev` — Next dev server.
-- `bun run build` — production build (no static export, all `force-dynamic`).
-- Tailwind tokens live in `styles/tokens.css` — change the palette there. Don't
-  add gradients or glassmorphism; the design language is restrained.
-- Pixi v8 — note `pixiLine` / counter-scale tricks in `MeasurementLayer.ts` to
-  keep dots and labels constant pixel size as the user zooms.
-- Supabase types: hand-rolled in `lib/supabase/types.ts`. Replace with
-  `bunx supabase gen types typescript` output once you have a project ID.
+- `bun run build` — production build (no static export, all
+  `force-dynamic`).
+- Tailwind tokens live in `styles/tokens.css` — change the palette
+  there. Don't add gradients or glassmorphism; the design language is
+  restrained.
+- Pixi v8 — the `MeasurementLayer` and `PlacedItemsLayer` use a
+  counter-scale trick (`px(n) = n / viewport.zoom`) to keep dots,
+  handles, and labels constant pixel size as the user zooms.
+- Supabase types: hand-rolled in `lib/supabase/types.ts`. Replace
+  with `bunx supabase gen types typescript` once you have a project
+  ID.
+
+---
+
+## What's deferred
+
+- DXF advanced entities: SPLINE, ELLIPSE, INSERT/blocks, HATCH.
+- DWG fall-back when `libredwg-web` fails on 2019+ files. We tell
+  the user to export to DXF/PDF instead.
+- Multi-page PDFs: only page 1 is rendered.
+- CRDT for fine-grained text editing (notes are last-write-wins
+  today).
+- Drag-and-drop on the canvas to reposition entire **drawing
+  layers**. Items, shapes, and notes already support this.
+- Cross-type reordering in the unified Layers panel — drawings have
+  `sortOrder`, items/shapes have `z_order` controls in the
+  Inspector but they don't share a single drag-to-reorder list yet.
+- Free-tier quotas (`usage_limits` stub table).
+- Auto-generated thumbnails (the `thumbnails` bucket exists).
 
 ---
 
 ## License
 
-Private (for now). Trace is currently free for everyone.
+[Elastic License 2.0](./LICENSE) — source-available, free for
+self-hosting and internal/commercial use, **but** you may not offer
+tracable (or a substantial subset of its features) as a hosted /
+managed / SaaS service to third parties. If you want a license for
+that, contact the maintainers.

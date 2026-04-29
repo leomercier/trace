@@ -42,6 +42,8 @@ export function Canvas({
   onMeasurementLabelMoveEnd?: (id: string) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const tool = useEditor((s) => s.tool);
+  const cursorClass = cursorForTool(tool);
   const apiRef = useRef<{
     app: PIXI.Application;
     viewport: Viewport;
@@ -293,6 +295,13 @@ export function Canvas({
     const a = apiRef.current;
     if (!a) return;
     const canvas = a.app.canvas as HTMLCanvasElement;
+    const host = hostRef.current;
+
+    function setDraggingClass(active: boolean) {
+      if (!host) return;
+      if (active) host.classList.add("is-dragging");
+      else host.classList.remove("is-dragging");
+    }
 
     let dragging = false;
     let lastX = 0;
@@ -383,6 +392,7 @@ export function Canvas({
               startDy: Number(m.label_dy ?? 0),
             };
             canvas.setPointerCapture(e.pointerId);
+            setDraggingClass(true);
             return;
           }
         }
@@ -408,6 +418,7 @@ export function Canvas({
                 },
               };
               canvas.setPointerCapture(e.pointerId);
+              setDraggingClass(true);
               return;
             }
           }
@@ -444,6 +455,7 @@ export function Canvas({
             },
           };
           canvas.setPointerCapture(e.pointerId);
+          setDraggingClass(true);
           return;
         }
       }
@@ -453,6 +465,7 @@ export function Canvas({
         lastX = sx;
         lastY = sy;
         canvas.setPointerCapture(e.pointerId);
+        if (isPan) setDraggingClass(true);
       }
     });
 
@@ -534,6 +547,7 @@ export function Canvas({
       dragging = false;
       itemDrag = null;
       labelDrag = null;
+      setDraggingClass(false);
       try { canvas.releasePointerCapture(e.pointerId); } catch {}
 
       if (wasLabelDrag) {
@@ -580,6 +594,9 @@ export function Canvas({
 
     canvas.addEventListener("pointercancel", () => {
       dragging = false;
+      itemDrag = null;
+      labelDrag = null;
+      setDraggingClass(false);
     });
 
     // Two-finger pinch zoom (touch)
@@ -635,9 +652,30 @@ export function Canvas({
   return (
     <div
       ref={hostRef}
-      className="pixi-host absolute inset-0 select-none touch-none bg-canvas"
+      data-tool={tool}
+      className={`pixi-host absolute inset-0 select-none touch-none bg-canvas ${cursorClass}`}
     />
   );
+}
+
+// `data-tool="pan"` cursors are owned by globals.css so the dragging
+// flip works through pointer-capture. For the other tools, a plain
+// Tailwind cursor utility on the host is enough.
+function cursorForTool(tool: string): string {
+  switch (tool) {
+    case "pan":
+      return "";
+    case "measure":
+    case "calibrate":
+    case "line":
+    case "rect":
+      return "cursor-crosshair";
+    case "note":
+    case "text":
+      return "cursor-text";
+    default:
+      return "cursor-default";
+  }
 }
 
 function pointSegDist2(px: number, py: number, ax: number, ay: number, bx: number, by: number) {

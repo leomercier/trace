@@ -33,7 +33,7 @@ export function OrgTopBar({
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
         <div className="flex items-center gap-3">
           <Link href="/app" className="font-serif text-xl">
-            trace
+            tracable
           </Link>
           <span className="text-ink-faint">/</span>
           <Link
