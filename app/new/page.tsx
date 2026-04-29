@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { NewClient } from "./NewClient";
+import { TraceWordmark } from "@/components/marketing/TraceLogo";
 
 export const metadata = { title: "New workspace — tracable" };
 export const dynamic = "force-dynamic";
@@ -17,8 +18,8 @@ export default function NewPage() {
   return (
     <main className="min-h-screen bg-bg">
       <header className="mx-auto flex max-w-4xl items-center justify-between px-6 py-6">
-        <Link href="/" className="font-serif text-2xl">
-          tracable
+        <Link href="/" aria-label="tracable home">
+          <TraceWordmark logoSize={22} />
         </Link>
         <Link
           href="/login"
