@@ -185,15 +185,6 @@ export function Inspector({
         ) : null}
       </div>
 
-      <div className="border-b border-border p-4">
-        <div className="text-xs uppercase tracking-wider text-ink-faint">Export</div>
-        <button
-          onClick={onExportPng}
-          className="mt-2 flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-border bg-panel-muted text-sm hover:bg-panel"
-        >
-          <Download size={14} /> Export as PNG
-        </button>
-      </div>
 
       {drawingSel ? (
         <div className="border-b border-border p-4">
@@ -347,6 +338,16 @@ export function Inspector({
             />
           ))}
         </ul>
+      </div>
+
+      <div className="mt-auto border-t border-border p-4">
+        <div className="text-xs uppercase tracking-wider text-ink-faint">Export</div>
+        <button
+          onClick={onExportPng}
+          className="mt-2 flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-border bg-panel-muted text-sm hover:bg-panel"
+        >
+          <Download size={14} /> Export as PNG
+        </button>
       </div>
     </aside>
     </>

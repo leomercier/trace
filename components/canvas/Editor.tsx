@@ -19,7 +19,18 @@ import type {
 import { createClient } from "@/lib/supabase/client";
 import { parseFile, inferFileType } from "./parsers";
 import { Button } from "@/components/ui/Button";
-import { Upload, Download, Maximize2, Share2, Package, Sparkles } from "lucide-react";
+import {
+  Check,
+  Copy,
+  Download,
+  LogOut,
+  Maximize2,
+  Package,
+  Share2,
+  Sparkles,
+  Upload,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
 import { ShareDialog } from "@/components/panels/ShareDialog";
 import { AttachmentsPanel } from "@/components/panels/AttachmentsPanel";
 import { EditorMobileBar } from "@/components/panels/EditorMobileBar";
@@ -62,6 +73,7 @@ export function Editor({ initial }: { initial: InitialData }) {
     bx: number;
     by: number;
   } | null>(null);
+  const [editorLoading, setEditorLoading] = useState(true);
   const [shareOpen, setShareOpen] = useState(false);
   const [mobileLayersOpen, setMobileLayersOpen] = useState(false);
   const [mobileInspectorOpen, setMobileInspectorOpen] = useState(false);
@@ -264,70 +276,69 @@ export function Editor({ initial }: { initial: InitialData }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial.page.id]);
 
+  // Single source of truth for fetching + parsing a drawing into the store.
+  // Used by both the initial load and post-upload refresh, so adding a new
+  // file never needs a window.location.reload().
+  const cancelledRef = useRef(false);
+  async function loadOne(args: {
+    id: string;
+    signedUrl: string;
+    type: any;
+    name: string;
+    sortOrder: number;
+    visible: boolean;
+    tx?: number;
+    ty?: number;
+    scale?: number;
+    rotation?: number;
+  }) {
+    let type = args.type;
+    if (!type || type === "other") {
+      const inferred = inferFileType(args.name || "");
+      if (inferred !== "other") {
+        type = inferred;
+      } else {
+        console.warn(
+          `[trace] skipping drawing "${args.name}" — unsupported type "${args.type}"`,
+        );
+        return null;
+      }
+    }
+    const res = await fetch(args.signedUrl);
+    const blob = await res.blob();
+    const hash = await hashBlob(blob);
+    const cacheable = type === "dxf" || type === "dwg";
+    const cached = cacheable ? await idbCacheGet(hash) : null;
+    let parsed = cached;
+    if (!parsed) {
+      try {
+        parsed = await parseFile(blob, type);
+        if (cacheable) await idbCacheSet(hash, parsed);
+      } catch (err) {
+        console.error(`[trace] failed to parse "${args.name}" (${type}):`, err);
+        return null;
+      }
+    }
+    if (cancelledRef.current) return null;
+    useEditor.getState().upsertDrawing({
+      id: args.id,
+      name: args.name,
+      fileType: type,
+      entities: parsed.entities,
+      bounds: parsed.bounds,
+      visible: args.visible,
+      sortOrder: args.sortOrder,
+      tx: args.tx ?? 0,
+      ty: args.ty ?? 0,
+      scale: args.scale ?? 1,
+      rotation: args.rotation ?? 0,
+    });
+    return parsed;
+  }
+
   // load all drawings (legacy primary + page_drawings rows)
   useEffect(() => {
-    let cancelled = false;
-    async function loadOne(args: {
-      id: string;
-      signedUrl: string;
-      type: any;
-      name: string;
-      sortOrder: number;
-      visible: boolean;
-      tx?: number;
-      ty?: number;
-      scale?: number;
-      rotation?: number;
-    }) {
-      // Best-effort: a missing/unknown type shouldn't break the whole
-      // page. Try to recover by re-inferring from the filename, and if
-      // that's still "other", skip the layer with a console warning.
-      let type = args.type;
-      if (!type || type === "other") {
-        const inferred = inferFileType(args.name || "");
-        if (inferred !== "other") {
-          type = inferred;
-        } else {
-          console.warn(
-            `[trace] skipping drawing "${args.name}" — unsupported type "${args.type}"`,
-          );
-          return null;
-        }
-      }
-      const res = await fetch(args.signedUrl);
-      const blob = await res.blob();
-      const hash = await hashBlob(blob);
-      const cacheable = type === "dxf" || type === "dwg";
-      const cached = cacheable ? await idbCacheGet(hash) : null;
-      let parsed = cached;
-      if (!parsed) {
-        try {
-          parsed = await parseFile(blob, type);
-          if (cacheable) await idbCacheSet(hash, parsed);
-        } catch (err) {
-          console.error(
-            `[trace] failed to parse "${args.name}" (${type}):`,
-            err,
-          );
-          return null;
-        }
-      }
-      if (cancelled) return null;
-      useEditor.getState().upsertDrawing({
-        id: args.id,
-        name: args.name,
-        fileType: type,
-        entities: parsed.entities,
-        bounds: parsed.bounds,
-        visible: args.visible,
-        sortOrder: args.sortOrder,
-        tx: args.tx ?? 0,
-        ty: args.ty ?? 0,
-        scale: args.scale ?? 1,
-        rotation: args.rotation ?? 0,
-      });
-      return parsed;
-    }
+    cancelledRef.current = false;
 
     (async () => {
       // 1) Legacy primary source on the page.
@@ -369,11 +380,15 @@ export function Editor({ initial }: { initial: InitialData }) {
           rotation: Number(d.rotation ?? 0),
         });
       }
-    })().catch((err) => {
-      console.error("Failed to load drawings:", err);
-    });
+    })()
+      .catch((err) => {
+        console.error("Failed to load drawings:", err);
+      })
+      .finally(() => {
+        if (!cancelledRef.current) setEditorLoading(false);
+      });
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial.page.id, initial.signedUrl]);
@@ -1020,6 +1035,19 @@ export function Editor({ initial }: { initial: InitialData }) {
           source_file_size: blob.size,
         })
         .eq("id", initial.page.id);
+      const { data: signed } = await supabase.storage
+        .from("drawings")
+        .createSignedUrl(path, 60 * 60);
+      if (signed?.signedUrl) {
+        await loadOne({
+          id: "primary",
+          signedUrl: signed.signedUrl,
+          type: detected,
+          name: fileName,
+          sortOrder: 0,
+          visible: true,
+        });
+      }
     } else {
       const existingMax =
         Math.max(
@@ -1035,8 +1063,21 @@ export function Editor({ initial }: { initial: InitialData }) {
         file_size: blob.size,
         sort_order: existingMax,
       });
+      const { data: signed } = await supabase.storage
+        .from("drawings")
+        .createSignedUrl(path, 60 * 60);
+      if (signed?.signedUrl) {
+        await loadOne({
+          id: layerId,
+          signedUrl: signed.signedUrl,
+          type: detected,
+          name: fileName,
+          sortOrder: existingMax,
+          visible: true,
+        });
+      }
     }
-    window.location.reload();
+    setUploadStatus(null);
   }
 
   async function updateDrawingTransform(
@@ -1090,7 +1131,7 @@ export function Editor({ initial }: { initial: InitialData }) {
       }
       await supabase.from("page_drawings").delete().eq("id", id);
     }
-    window.location.reload();
+    // No reload — the store has already removed the drawing in-place.
   }
 
   async function exportPng() {
@@ -1110,27 +1151,33 @@ export function Editor({ initial }: { initial: InitialData }) {
 
   return (
     <div className="flex h-screen w-full flex-col">
-      <div className="hidden md:block">
-        <EditorTopBar
-          orgId={initial.orgId}
-          orgSlug={initial.orgSlug}
-          isAnonymous={initial.orgIsAnonymous}
-          expiresAt={initial.orgExpiresAt}
-          projectId={initial.projectId}
-          projectName={initial.projectName}
-          currentPageId={initial.page.id}
-          currentPageName={initial.page.name}
-          pages={initial.pages}
-          user={initial.user}
-          role={initial.role}
-          presence={presence}
-          onFit={() => canvasApi.current?.fitToContent()}
-          onInventory={() => setInventoryOpen(true)}
-          onAssistant={() => setAssistantOpen(true)}
-          onShare={() => setShareOpen(true)}
-          onDeletePage={onDeletePage}
-        />
-      </div>
+      {editorLoading ? (
+        <div className="pointer-events-auto fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-bg/95 backdrop-blur-sm">
+          <div className="size-10 animate-spin rounded-full border-2 border-ink border-r-transparent" />
+          <div className="font-serif text-2xl text-ink">Loading workspace…</div>
+          <div className="text-sm text-ink-muted">{initial.page.name}</div>
+        </div>
+      ) : null}
+      {/* Floating corner controls — replaces the old EditorTopBar. The
+          left + right docked panels (LayersPanel + Inspector) are the
+          primary chrome on desktop; on mobile the bottom toolbar +
+          slide-overs handle everything. */}
+      <FloatingControls
+        org={{
+          id: initial.orgId,
+          slug: initial.orgSlug,
+          isAnonymous: initial.orgIsAnonymous,
+          expiresAt: initial.orgExpiresAt,
+        }}
+        user={initial.user}
+        role={initial.role}
+        presence={presence}
+        canEdit={initial.role !== "viewer"}
+        canAdmin={initial.role === "owner" || initial.role === "admin"}
+        onInventory={() => setInventoryOpen(true)}
+        onAssistant={() => setAssistantOpen(true)}
+        onShare={() => setShareOpen(true)}
+      />
       <div className="flex min-h-0 w-full flex-1 flex-col md:flex-row">
       <EditorMobileBar
         orgSlug={initial.orgSlug}
@@ -1360,6 +1407,191 @@ export function Editor({ initial }: { initial: InitialData }) {
 
 function useEditorCanEdit() {
   return useEditor((s) => s.canEdit);
+}
+
+function FloatingControls({
+  org,
+  user,
+  role,
+  presence,
+  canEdit,
+  canAdmin,
+  onInventory,
+  onAssistant,
+  onShare,
+}: {
+  org: { id: string; slug: string; isAnonymous: boolean; expiresAt: string | null };
+  user: { id: string; email: string; name: string; avatar: string | null };
+  role: "owner" | "admin" | "editor" | "viewer";
+  presence: { userId: string; name: string; color: string }[];
+  canEdit: boolean;
+  canAdmin: boolean;
+  onInventory: () => void;
+  onAssistant: () => void;
+  onShare: () => void;
+}) {
+  const supabase = createClient();
+  const router = useRouter();
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!profileOpen) return;
+    const onClick = (e: Event) => {
+      if (!profileRef.current?.contains(e.target as any)) setProfileOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("touchstart", onClick);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("touchstart", onClick);
+    };
+  }, [profileOpen]);
+
+  function copyShareUrl() {
+    if (typeof window === "undefined") return;
+    navigator.clipboard
+      .writeText(window.location.href)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {});
+  }
+
+  const others = presence.filter((p) => p.userId !== user.id);
+
+  return (
+    <div className="pointer-events-none fixed right-3 top-3 z-30 flex items-center gap-2">
+      {org.isAnonymous ? (
+        <button
+          onClick={copyShareUrl}
+          title="Copy public link — anyone with this URL can collaborate"
+          className="pointer-events-auto flex h-9 items-center gap-1.5 rounded-md border border-yellow-200 bg-yellow-50 px-2.5 text-xs text-yellow-900 shadow-sm hover:border-yellow-300"
+        >
+          {copied ? <Check size={13} /> : <Copy size={13} />}
+          <span>{copied ? "Copied" : org.expiresAt ? `Sandbox · ${daysLeft(org.expiresAt)}` : "Sandbox"}</span>
+        </button>
+      ) : null}
+      {canEdit ? (
+        <button
+          onClick={onInventory}
+          title="Inventory (⌘I)"
+          className="pointer-events-auto flex h-9 items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 text-xs shadow-sm hover:border-border-strong"
+        >
+          <Package size={13} /> <span className="hidden md:inline">Inventory</span>
+        </button>
+      ) : null}
+      <button
+        onClick={onAssistant}
+        title="Ask AI (⌘K)"
+        className="pointer-events-auto flex h-9 items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 text-xs shadow-sm hover:border-border-strong"
+        style={{ color: "#7c3aed" }}
+      >
+        <Sparkles size={13} /> <span className="hidden md:inline">Ask AI</span>
+      </button>
+      {others.length > 0 ? (
+        <div className="pointer-events-auto hidden items-center md:flex">
+          <div className="flex -space-x-2">
+            {others.slice(0, 4).map((u) => (
+              <div key={u.userId} className="rounded-full border-2 border-bg" title={u.name}>
+                <Avatar name={u.name} color={u.color} size={24} />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {canAdmin ? (
+        <button
+          onClick={onShare}
+          className="pointer-events-auto flex h-9 items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 text-xs shadow-sm hover:border-border-strong"
+        >
+          <Share2 size={13} /> <span className="hidden md:inline">Share</span>
+        </button>
+      ) : null}
+      <div ref={profileRef} className="pointer-events-auto relative">
+        <button
+          onClick={() => setProfileOpen((v) => !v)}
+          className="flex items-center rounded-full p-0.5 hover:bg-panel-muted"
+          aria-label="Profile"
+        >
+          <Avatar name={user.name} src={user.avatar} size={28} />
+        </button>
+        {profileOpen ? (
+          <div className="absolute right-0 top-full mt-1 w-60 rounded-md border border-border bg-panel p-1 shadow-lg">
+            <div className="px-3 py-2 text-xs text-ink-faint">
+              {user.email || "Anonymous session"}
+            </div>
+            {org.isAnonymous ? (
+              <a
+                href="/signup"
+                className="mx-1 mb-1 block rounded bg-ink px-3 py-2 text-sm text-white hover:bg-black/90"
+              >
+                Sign in to keep this workspace
+              </a>
+            ) : null}
+            <a
+              href="/app"
+              className="block rounded px-3 py-2 text-sm hover:bg-panel-muted"
+            >
+              Switch workspace
+            </a>
+            <button
+              onClick={async () => {
+                setProfileOpen(false);
+                if (
+                  !confirm(
+                    "Duplicate this workspace including all projects, pages, and annotations?",
+                  )
+                )
+                  return;
+                const res = await fetch("/api/orgs/duplicate", {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ source_org_id: org.id }),
+                });
+                const json = await res.json();
+                if (!res.ok) {
+                  alert(json.error || "Duplicate failed");
+                  return;
+                }
+                window.location.href = `/app/${json.org.slug}`;
+              }}
+              className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-panel-muted"
+            >
+              <Copy size={14} /> Duplicate workspace
+            </button>
+            {canAdmin ? (
+              <a
+                href={`/app/${org.slug}/settings`}
+                className="block rounded px-3 py-2 text-sm hover:bg-panel-muted"
+              >
+                Workspace settings
+              </a>
+            ) : null}
+            <button
+              onClick={async () => {
+                await supabase.auth.signOut();
+                router.push("/");
+                router.refresh();
+              }}
+              className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-panel-muted"
+            >
+              <LogOut size={14} /> Sign out
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function daysLeft(iso: string): string {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return "expired";
+  const days = Math.ceil(ms / (24 * 3600 * 1000));
+  return days === 1 ? "1d" : `${days}d`;
 }
 
 function PresenceStack({
