@@ -22,6 +22,10 @@ const config: Config = {
         measure: "var(--measure)",
         note: "var(--note)",
         "note-border": "var(--note-border)",
+        "cursor-1": "var(--cursor-1)",
+        "cursor-2": "var(--cursor-2)",
+        "cursor-3": "var(--cursor-3)",
+        "cursor-4": "var(--cursor-4)",
       },
       fontFamily: {
         serif: ["var(--font-serif)"],
