@@ -33,20 +33,26 @@ export default function Landing() {
           </p>
           <div className="mt-10 flex flex-wrap gap-3">
             <Link
-              href="/signup"
+              href="/new"
               className="rounded-md bg-ink px-6 py-3 text-white hover:bg-black/90"
             >
-              Start free
+              Try it now
+            </Link>
+            <Link
+              href="/signup"
+              className="rounded-md border border-border bg-panel px-6 py-3 hover:border-border-strong"
+            >
+              Create a workspace
             </Link>
             <Link
               href="/login"
-              className="rounded-md border border-border bg-panel px-6 py-3 hover:border-border-strong"
+              className="rounded-md border border-transparent bg-transparent px-6 py-3 text-ink-muted hover:text-ink"
             >
               I already have an account
             </Link>
           </div>
           <p className="mt-6 text-sm text-ink-faint">
-            Free for everyone. No credit card.
+            &ldquo;Try it now&rdquo; spins up a sandbox in one click — no signup, kept for 7 days.
           </p>
         </div>
       </section>

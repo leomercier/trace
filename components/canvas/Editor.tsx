@@ -42,6 +42,8 @@ interface InitialData {
   user: { id: string; name: string; email: string; avatar: string | null };
   orgId: string;
   orgSlug: string;
+  orgIsAnonymous: boolean;
+  orgExpiresAt: string | null;
   projectId: string;
   projectName: string;
   pages: { id: string; name: string }[];
@@ -1009,7 +1011,10 @@ export function Editor({ initial }: { initial: InitialData }) {
     <div className="flex h-screen w-full flex-col">
       <div className="hidden md:block">
         <EditorTopBar
+          orgId={initial.orgId}
           orgSlug={initial.orgSlug}
+          isAnonymous={initial.orgIsAnonymous}
+          expiresAt={initial.orgExpiresAt}
           projectId={initial.projectId}
           projectName={initial.projectName}
           currentPageId={initial.page.id}

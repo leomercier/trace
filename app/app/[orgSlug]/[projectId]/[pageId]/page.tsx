@@ -14,7 +14,7 @@ export default async function EditorPage({
 
   const { data: org } = await supabase
     .from("organisations")
-    .select("id, name, slug")
+    .select("id, name, slug, is_anonymous, expires_at")
     .eq("slug", params.orgSlug)
     .maybeSingle();
   if (!org) notFound();
@@ -102,6 +102,8 @@ export default async function EditorPage({
         },
         orgId: org.id,
         orgSlug: params.orgSlug,
+        orgIsAnonymous: !!org.is_anonymous,
+        orgExpiresAt: org.expires_at ?? null,
         projectId: params.projectId,
         projectName: project?.name || "",
         pages: (pages || []) as any,
