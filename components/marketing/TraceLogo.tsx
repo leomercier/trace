@@ -1,41 +1,40 @@
-import { cn } from "@/lib/utils/cn";
+"use client";
 
+import { cn } from "@/lib/utils/cn";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { ArtboardToolIcon } from "@hugeicons/core-free-icons";
+
+/**
+ * Brand mark — the Hugeicons "Artboard tool" glyph. We standardised on this
+ * icon to pair with the trace wordmark; one-character drawings/CAD-tool
+ * affordance that reads at any size.
+ */
 export function TraceLogo({
   className,
-  size = 28,
+  size = 24,
 }: {
   className?: string;
   size?: number;
 }) {
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 512 512"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
+    <HugeiconsIcon
+      icon={ArtboardToolIcon}
+      size={size}
+      strokeWidth={1.5}
       className={cn("inline-block", className)}
       aria-hidden="true"
-    >
-      <path
-        d="M164 124H348 M256 124V360 M256 360H336 M336 360V300 M336 300H286"
-        stroke="currentColor"
-        strokeWidth="44"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="164" cy="124" r="16" fill="currentColor" />
-      <circle cx="256" cy="124" r="16" fill="currentColor" />
-      <circle cx="348" cy="124" r="16" fill="currentColor" />
-      <circle cx="256" cy="360" r="16" fill="currentColor" />
-      <circle cx="336" cy="300" r="16" fill="currentColor" />
-    </svg>
+    />
   );
 }
 
+/**
+ * Logomark + "trace" wordmark. The wordmark is rendered in Geist Sans
+ * (the project's body face) at semibold to match the system without
+ * pulling in a separate display font.
+ */
 export function TraceWordmark({
   className,
-  logoSize = 22,
+  logoSize = 20,
 }: {
   className?: string;
   logoSize?: number;
@@ -43,7 +42,7 @@ export function TraceWordmark({
   return (
     <span className={cn("inline-flex items-center gap-2", className)}>
       <TraceLogo size={logoSize} />
-      <span className="font-display text-[20px] font-semibold tracking-tight">
+      <span className="font-sans text-[20px] font-semibold tracking-tight">
         trace
       </span>
     </span>

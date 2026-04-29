@@ -31,6 +31,7 @@ import {
   Upload,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { TraceWordmark } from "@/components/marketing/TraceLogo";
 import { ShareDialog } from "@/components/panels/ShareDialog";
 import { AttachmentsPanel } from "@/components/panels/AttachmentsPanel";
 import { EditorMobileBar } from "@/components/panels/EditorMobileBar";
@@ -1156,9 +1157,7 @@ export function Editor({ initial }: { initial: InitialData }) {
           <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-trace-black/50">
             Setting up canvas
           </div>
-          <div className="text-[28px] font-semibold tracking-tight text-trace-black md:text-[40px]">
-            trace
-          </div>
+          <TraceWordmark logoSize={28} className="text-[28px] md:text-[32px]" />
           <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-trace-black/60">
             <div className="size-1.5 animate-pulse rounded-full bg-trace-black" />
             <span>{initial.page.name}</span>
