@@ -586,6 +586,8 @@ export function Editor({ initial }: { initial: InitialData }) {
       bx: b.x as any,
       by: b.y as any,
       label: null,
+      label_dx: 0 as any,
+      label_dy: 0 as any,
       created_by: initial.user.id,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -1031,6 +1033,24 @@ export function Editor({ initial }: { initial: InitialData }) {
           onItemResize={onItemResize}
           onItemRotate={onItemRotate}
           onItemMoveEnd={onItemMoveEnd}
+          onMeasurementLabelMove={(id, dx, dy) => {
+            const m = useEditor.getState().measurements[id];
+            if (!m) return;
+            useEditor.getState().upsertMeasurement({
+              ...m,
+              label_dx: dx as any,
+              label_dy: dy as any,
+            });
+          }}
+          onMeasurementLabelMoveEnd={async (id) => {
+            const m = useEditor.getState().measurements[id];
+            if (!m) return;
+            if (id.startsWith("tmp-")) return;
+            await supabase
+              .from("measurements")
+              .update({ label_dx: m.label_dx, label_dy: m.label_dy })
+              .eq("id", id);
+          }}
         />
         <NotesOverlay
           canEdit={useEditorCanEdit()}

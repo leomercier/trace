@@ -78,6 +78,8 @@ export interface Measurement {
   bx: number;
   by: number;
   label: string | null;
+  label_dx: number;
+  label_dy: number;
   created_by: string | null;
   created_at: string;
   updated_at: string;

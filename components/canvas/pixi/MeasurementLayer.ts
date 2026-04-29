@@ -28,6 +28,10 @@ export class MeasurementLayer extends PIXI.Container {
     this.addChild(this.draftGfx);
   }
 
+  // Last-rendered label rectangles in world space, for hit-testing the
+  // draggable label area.
+  private labelRects: { id: string; x: number; y: number; w: number; h: number }[] = [];
+
   render(
     measurements: Measurement[],
     selectionId: string | null,
@@ -39,6 +43,7 @@ export class MeasurementLayer extends PIXI.Container {
     this.linesGfx.clear();
     this.dotsGfx.clear();
     this.labelLayer.removeChildren();
+    this.labelRects = [];
 
     for (const m of measurements) {
       const ax = +m.ax,
@@ -62,6 +67,23 @@ export class MeasurementLayer extends PIXI.Container {
       const label = m.label ? `${m.label} · ${lenStr}` : lenStr;
       const mx = (ax + bx) / 2;
       const my = (ay + by) / 2;
+      const dx = Number(m.label_dx ?? 0);
+      const dy = Number(m.label_dy ?? 0);
+      const lx = mx + dx;
+      const ly = my + dy;
+
+      // Dotted leader line from midpoint to offset label
+      if (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001) {
+        this.linesGfx
+          .moveTo(mx, my)
+          .lineTo(lx, ly)
+          .stroke({
+            color: MEASURE,
+            width: px(0.8),
+            alpha: 0.6,
+          });
+      }
+
       const txt = new PIXI.Text({
         text: label,
         style: {
@@ -81,9 +103,19 @@ export class MeasurementLayer extends PIXI.Container {
       cont.addChild(bg);
       txt.anchor.set(0.5, 0.5);
       cont.addChild(txt);
-      cont.position.set(mx, my);
+      cont.position.set(lx, ly);
       cont.scale.set(1 / z, 1 / z);
       this.labelLayer.addChild(cont);
+
+      // Record the label's hit rect in WORLD units (counter-scaled to match
+      // the rendered pill). Used by Canvas.tsx for label-drag.
+      this.labelRects.push({
+        id: m.id,
+        x: lx - (w / 2) / z,
+        y: ly - (h / 2) / z,
+        w: w / z,
+        h: h / z,
+      });
 
       if (selectionId === m.id) {
         // emphasis ring
@@ -99,6 +131,20 @@ export class MeasurementLayer extends PIXI.Container {
       pixelLine: false,
     });
     this.dotsGfx.fill(MEASURE);
+  }
+
+  /**
+   * Returns the measurement id whose label rectangle contains the world point
+   * (wx, wy), or null. Topmost (last-rendered) wins.
+   */
+  hitLabel(wx: number, wy: number): string | null {
+    for (let i = this.labelRects.length - 1; i >= 0; i--) {
+      const r = this.labelRects[i];
+      if (wx >= r.x && wx <= r.x + r.w && wy >= r.y && wy <= r.y + r.h) {
+        return r.id;
+      }
+    }
+    return null;
   }
 
   drawDraft(start: { x: number; y: number } | null, end: { x: number; y: number } | null) {

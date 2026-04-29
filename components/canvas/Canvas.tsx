@@ -25,6 +25,8 @@ export function Canvas({
   onItemResize,
   onItemRotate,
   onItemMoveEnd,
+  onMeasurementLabelMove,
+  onMeasurementLabelMoveEnd,
 }: {
   onPointerWorld?: (p: { x: number; y: number; snapped: boolean }) => void;
   onClickWorld?: (p: { x: number; y: number; snapped: boolean }) => void;
@@ -36,6 +38,8 @@ export function Canvas({
   onItemResize?: (id: string, scaleW: number, scaleD: number) => void;
   onItemRotate?: (id: string, rotation: number) => void;
   onItemMoveEnd?: (id: string) => void;
+  onMeasurementLabelMove?: (id: string, dx: number, dy: number) => void;
+  onMeasurementLabelMoveEnd?: (id: string) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<{
@@ -304,6 +308,14 @@ export function Canvas({
           itemStart: { x: number; y: number; scale_w: number; scale_d: number; rotation: number; w_mm: number; d_mm: number };
         }
       | null = null;
+    let labelDrag:
+      | {
+          id: string;
+          startWorld: { x: number; y: number };
+          startDx: number;
+          startDy: number;
+        }
+      | null = null;
     const PAN_TOOLS = new Set(["pan"]);
 
     const SNAP_PX = 8;
@@ -357,6 +369,23 @@ export function Canvas({
         const world = a!.viewport.screenToWorld(sx, sy);
         const items = Object.values(state.placedItems);
         const realPerUnit = state.scale?.realPerUnit ?? null;
+
+        // Measurement label drag (highest priority — labels render on top).
+        const labelHit = a!.measureLayer.hitLabel(world.x, world.y);
+        if (labelHit) {
+          const m = state.measurements[labelHit];
+          if (m) {
+            onSelectionPick?.({ kind: "measurement", id: labelHit });
+            labelDrag = {
+              id: labelHit,
+              startWorld: world,
+              startDx: Number(m.label_dx ?? 0),
+              startDy: Number(m.label_dy ?? 0),
+            };
+            canvas.setPointerCapture(e.pointerId);
+            return;
+          }
+        }
 
         // Selected item handle hit test (only if NOT locked)
         if (state.selection?.kind === "placed") {
@@ -432,6 +461,18 @@ export function Canvas({
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
 
+      if (labelDrag) {
+        const world = a!.viewport.screenToWorld(sx, sy);
+        const dx = world.x - labelDrag.startWorld.x;
+        const dy = world.y - labelDrag.startWorld.y;
+        onMeasurementLabelMove?.(
+          labelDrag.id,
+          labelDrag.startDx + dx,
+          labelDrag.startDy + dy,
+        );
+        return;
+      }
+
       if (itemDrag) {
         const world = a!.viewport.screenToWorld(sx, sy);
         const dx = world.x - itemDrag.startWorld.x;
@@ -489,10 +530,16 @@ export function Canvas({
       const sy = e.clientY - rect.top;
       const wasDragging = dragging;
       const wasItemDrag = itemDrag;
+      const wasLabelDrag = labelDrag;
       dragging = false;
       itemDrag = null;
+      labelDrag = null;
       try { canvas.releasePointerCapture(e.pointerId); } catch {}
 
+      if (wasLabelDrag) {
+        onMeasurementLabelMoveEnd?.(wasLabelDrag.id);
+        return;
+      }
       if (wasItemDrag) {
         onItemMoveEnd?.(wasItemDrag.id);
         return;

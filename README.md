@@ -57,6 +57,8 @@ All variables and what they do:
    - `supabase/migrations/0004_inventory.sql` — inventory + AI usage tables
    - `supabase/migrations/0005_notes_drawings.sql` — note styling + multi-file layers
    - `supabase/migrations/0006_placed_lock.sql` — lock flag on placed items
+   - `supabase/migrations/0007_shapes.sql` — line / rectangle / text shapes
+   - `supabase/migrations/0008_measurement_label_offset.sql` — draggable measurement labels
 3. **Enable Realtime** for these tables (Database → Replication):
    - `measurements`
    - `notes`
