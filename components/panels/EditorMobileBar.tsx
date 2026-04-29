@@ -1,6 +1,6 @@
 "use client";
 
-import { Share2 } from "lucide-react";
+import { Layers, SlidersHorizontal } from "lucide-react";
 import { PageMenu } from "./PageMenu";
 
 interface PageRow {
@@ -9,9 +9,11 @@ interface PageRow {
 }
 
 /**
- * Mobile-only bar shown in the editor: hamburger left, page name center,
- * share right. The desktop OrgTopBar (provided by the layout) is hidden on
- * mobile via Tailwind's md: utilities.
+ * Mobile-only bar shown in the editor:
+ *   [hamburger] [layers] [page name] [properties]
+ * The right side opens the Inspector slide-over (properties panel); the
+ * layers icon opens the Layers slide-over from the left. Hamburger keeps
+ * the existing PageMenu (pages, settings, sign out).
  */
 export function EditorMobileBar({
   orgSlug,
@@ -22,7 +24,9 @@ export function EditorMobileBar({
   pages,
   canEdit,
   canAdmin,
-  onShare,
+  onLayers,
+  onInspector,
+  onDeletePage,
 }: {
   orgSlug: string;
   projectId: string;
@@ -32,11 +36,13 @@ export function EditorMobileBar({
   pages: PageRow[];
   canEdit: boolean;
   canAdmin: boolean;
-  onShare?: () => void;
+  onLayers: () => void;
+  onInspector: () => void;
+  onDeletePage?: (id: string) => void;
 }) {
   return (
     <div className="sticky top-0 z-30 border-b border-border bg-bg/90 backdrop-blur md:hidden">
-      <div className="flex items-center justify-between gap-2 px-3 py-2">
+      <div className="flex items-center gap-1.5 px-2 py-2">
         <PageMenu
           orgSlug={orgSlug}
           projectId={projectId}
@@ -45,21 +51,25 @@ export function EditorMobileBar({
           pages={pages}
           canEdit={canEdit}
           canAdmin={canAdmin}
+          onDeletePage={onDeletePage}
         />
+        <button
+          onClick={onLayers}
+          aria-label="Layers"
+          className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-panel hover:border-border-strong"
+        >
+          <Layers size={16} />
+        </button>
         <div className="min-w-0 flex-1 text-center">
           <div className="truncate font-serif text-base">{currentPageName}</div>
         </div>
-        {canAdmin && onShare ? (
-          <button
-            onClick={onShare}
-            aria-label="Share"
-            className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-panel hover:border-border-strong"
-          >
-            <Share2 size={16} />
-          </button>
-        ) : (
-          <span className="w-9" />
-        )}
+        <button
+          onClick={onInspector}
+          aria-label="Properties"
+          className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-panel hover:border-border-strong"
+        >
+          <SlidersHorizontal size={16} />
+        </button>
       </div>
     </div>
   );

@@ -26,6 +26,8 @@ export function Inspector({
   onChangePlacedItemZ,
   onExportPng,
   scaleControls,
+  mobileOpen,
+  onMobileClose,
 }: {
   pageName: string;
   onRename: (name: string) => void;
@@ -36,6 +38,8 @@ export function Inspector({
   onChangePlacedItemZ: (id: string, mode: "front" | "back" | "forward" | "backward") => void;
   onExportPng: () => void;
   scaleControls: React.ReactNode;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }) {
   const selection = useEditor((s) => s.selection);
   const measurements = useEditor((s) => s.measurements);
@@ -61,8 +65,37 @@ export function Inspector({
   const placedSel =
     selection?.kind === "placed" ? placedItems[selection.id] : null;
 
+  const asideClass = mobileOpen
+    ? "fixed right-0 top-0 z-40 flex h-full w-80 max-w-[85vw] flex-col overflow-y-auto border-l border-border bg-panel shadow-lg md:relative md:w-80 md:max-w-none md:shadow-none"
+    : "hidden w-80 shrink-0 flex-col border-l border-border bg-panel md:flex";
+
   return (
-    <aside className="hidden w-80 shrink-0 flex-col border-l border-border bg-panel md:flex">
+    <>
+      {mobileOpen ? (
+        <div
+          className="fixed inset-0 z-30 bg-black/30 backdrop-blur-sm md:hidden"
+          onClick={onMobileClose}
+          aria-hidden
+        />
+      ) : null}
+    <aside
+      className={asideClass}
+      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+    >
+      {onMobileClose ? (
+        <div className="flex items-center justify-between border-b border-border px-3 py-2 md:hidden">
+          <div className="text-xs uppercase tracking-wider text-ink-faint">
+            Properties
+          </div>
+          <button
+            onClick={onMobileClose}
+            className="rounded p-2 text-ink-muted hover:bg-panel-muted hover:text-ink"
+            aria-label="Close"
+          >
+            <span className="text-xl leading-none">×</span>
+          </button>
+        </div>
+      ) : null}
       <div className="border-b border-border p-4">
         <div className="text-xs uppercase tracking-wider text-ink-faint">Page</div>
         <input
@@ -241,6 +274,7 @@ export function Inspector({
         </ul>
       </div>
     </aside>
+    </>
   );
 }
 

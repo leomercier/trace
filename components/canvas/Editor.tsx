@@ -20,7 +20,6 @@ import { parseFile, inferFileType } from "./parsers";
 import { Button } from "@/components/ui/Button";
 import { Upload, Download, Maximize2, Share2, Package, Sparkles } from "lucide-react";
 import { ShareDialog } from "@/components/panels/ShareDialog";
-import { MobileSheet } from "@/components/panels/MobileSheet";
 import { AttachmentsPanel } from "@/components/panels/AttachmentsPanel";
 import { EditorMobileBar } from "@/components/panels/EditorMobileBar";
 import { EditorTopBar } from "@/components/panels/EditorTopBar";
@@ -60,6 +59,8 @@ export function Editor({ initial }: { initial: InitialData }) {
     by: number;
   } | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  const [mobileLayersOpen, setMobileLayersOpen] = useState(false);
+  const [mobileInspectorOpen, setMobileInspectorOpen] = useState(false);
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [dwgConverting, setDwgConverting] = useState(false);
@@ -739,10 +740,14 @@ export function Editor({ initial }: { initial: InitialData }) {
         pages={initial.pages}
         canEdit={initial.role !== "viewer"}
         canAdmin={initial.role === "owner" || initial.role === "admin"}
-        onShare={() => setShareOpen(true)}
+        onLayers={() => setMobileLayersOpen(true)}
+        onInspector={() => setMobileInspectorOpen(true)}
+        onDeletePage={onDeletePage}
       />
       <LayersPanel
         canEdit={initial.role !== "viewer"}
+        mobileOpen={mobileLayersOpen}
+        onMobileClose={() => setMobileLayersOpen(false)}
         onUpload={onUploadFile}
         onSetVisible={setDrawingVisible}
         onDelete={deleteDrawing}
@@ -826,18 +831,10 @@ export function Editor({ initial }: { initial: InitialData }) {
           pageId={initial.page.id}
         />
       </div>
-      <MobileSheet
-        pageName={initial.page.name}
-        onCalibrateStart={() => useEditor.getState().setTool("calibrate")}
-        onDeleteSelection={() => {
-          const sel = useEditor.getState().selection;
-          if (sel?.kind === "measurement") deleteMeasurement(sel.id);
-          if (sel?.kind === "note") deleteNote(sel.id);
-          useEditor.getState().setSelection(null);
-        }}
-      />
       <Inspector
         pageName={initial.page.name}
+        mobileOpen={mobileInspectorOpen}
+        onMobileClose={() => setMobileInspectorOpen(false)}
         onRename={renamePage}
         onRenameMeasurement={renameMeasurement}
         onDeleteMeasurement={deleteMeasurement}
@@ -905,7 +902,7 @@ function UploadButton({ onUpload }: { onUpload: (f: File) => void }) {
       <input
         type="file"
         className="hidden"
-        accept=".dwg,.dxf,.pdf,.svg,.png,.jpg,.jpeg"
+        
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) onUpload(f);
@@ -974,7 +971,7 @@ function FileDropOverlay({
           <input
             type="file"
             className="hidden"
-            accept=".dwg,.dxf,.pdf,.svg,.png,.jpg,.jpeg"
+            
             onChange={(e) => {
               const f = e.target.files?.[0];
               if (f) onUpload(f);
