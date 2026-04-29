@@ -2,10 +2,10 @@ import * as PIXI from "pixi.js";
 import type { Drawing } from "@/stores/editorStore";
 import type { Bounds } from "@/lib/utils/geometry";
 import type { Viewport } from "./Viewport";
+import { HANDLE_PX, HANDLE_WHITE, SELECTION_BLUE, SELECTION_LOCK } from "./selection";
 
-const HANDLE_PX = 8;
-const SELECTION_COLOR = 0x1c1917;
-const LOCK_COLOR = 0x9ca3af;
+const SELECTION_COLOR = SELECTION_BLUE;
+const LOCK_COLOR = SELECTION_LOCK;
 
 /**
  * Renders the selection chrome for the currently-selected drawing
@@ -68,20 +68,30 @@ export class DrawingSelectionLayer extends PIXI.Container {
 
     if (drawing.locked) return;
 
-    // Resize handle (bottom-right corner)
+    // Four corner resize handles. Drawings scale uniformly so any
+    // corner produces the same effect — drawing them all reads as
+    // "this is resizable" without surprising the user.
     const hx = w / 2;
     const hy = h / 2;
-    this.gfx
-      .rect(hx - px(HANDLE_PX / 2), hy - px(HANDLE_PX / 2), px(HANDLE_PX), px(HANDLE_PX))
-      .fill(0xffffff)
-      .stroke({ color: stroke, width: px(1.5) });
+    const corners: [number, number][] = [
+      [-hx, -hy],
+      [hx, -hy],
+      [-hx, hy],
+      [hx, hy],
+    ];
+    for (const [cx, cy] of corners) {
+      this.gfx
+        .rect(cx - px(HANDLE_PX / 2), cy - px(HANDLE_PX / 2), px(HANDLE_PX), px(HANDLE_PX))
+        .fill(HANDLE_WHITE)
+        .stroke({ color: stroke, width: px(1.5) });
+    }
 
     // Rotate handle (centred 20px above the top edge)
     const ry = -h / 2 - px(20);
     this.gfx.moveTo(0, -h / 2).lineTo(0, ry).stroke({ color: stroke, width: px(1) });
     this.gfx
       .circle(0, ry, px(HANDLE_PX / 2))
-      .fill(0xffffff)
+      .fill(HANDLE_WHITE)
       .stroke({ color: stroke, width: px(1.5) });
   }
 
@@ -112,7 +122,14 @@ export class DrawingSelectionLayer extends PIXI.Container {
     const localH = d.bounds.maxY - d.bounds.minY;
     const w = localW * (d.scale || 1);
     const h = localH * (d.scale || 1);
-    if (Math.abs(local.x - w / 2) <= tol && Math.abs(local.y - h / 2) <= tol) {
+    const hx = w / 2;
+    const hy = h / 2;
+    if (
+      (Math.abs(local.x - hx) <= tol && Math.abs(local.y - hy) <= tol) ||
+      (Math.abs(local.x + hx) <= tol && Math.abs(local.y - hy) <= tol) ||
+      (Math.abs(local.x - hx) <= tol && Math.abs(local.y + hy) <= tol) ||
+      (Math.abs(local.x + hx) <= tol && Math.abs(local.y + hy) <= tol)
+    ) {
       return "resize";
     }
     const ry = -h / 2 - 20 / z;
@@ -196,10 +213,11 @@ export const drawingTransform = {
   },
 
   /**
-   * Resize: drag the bottom-right handle. We change `scale` uniformly,
-   * pivoting on the drawing's centre so the layer grows symmetrically.
-   * `bounds` is the untransformed bounds; we use it to convert the
-   * pointer's local position back into a fresh scale value.
+   * Resize: drag any corner handle. Drawings scale uniformly about
+   * their centre, so the only thing that matters is how far the
+   * pointer is from the centre — the corner sign doesn't change the
+   * answer. We pick whichever axis the user has stretched most so
+   * the corner under their cursor follows them.
    */
   resize(
     start: DrawingTransform,
@@ -210,10 +228,11 @@ export const drawingTransform = {
     const localW = bounds.maxX - bounds.minX;
     const localH = bounds.maxY - bounds.minY;
     if (localW < 1e-6 || localH < 1e-6) return {};
-    // The handle sits at (+halfW * scale, +halfH * scale) in local space;
-    // solve for scale that puts it under the pointer.
-    const sx = (localPointX * 2) / localW;
-    const sy = (localPointY * 2) / localH;
+    // Untransformed half-extents are localW/2 + localH/2; the
+    // pointer's |distance| from centre divided by the half-extent
+    // gives the new scale needed to put a corner under the pointer.
+    const sx = (Math.abs(localPointX) * 2) / localW;
+    const sy = (Math.abs(localPointY) * 2) / localH;
     const next = Math.max(0.05, Math.max(sx, sy));
     return { scale: next };
   },

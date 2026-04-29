@@ -1,9 +1,9 @@
 import * as PIXI from "pixi.js";
 import type { PlacedItem } from "@/lib/supabase/types";
 import type { Viewport } from "./Viewport";
+import { HANDLE_PX, HANDLE_WHITE, SELECTION_BLUE } from "./selection";
 
-const HANDLE_PX = 8;
-const SELECTION_COLOR = 0x1c1917;
+const SELECTION_COLOR = SELECTION_BLUE;
 
 interface ItemNode {
   container: PIXI.Container;
@@ -125,15 +125,31 @@ export class PlacedItemsLayer extends PIXI.Container {
             pixelLine: false,
           });
 
-        // Resize handle (bottom-right corner)
+        // Four corner resize handles. The active resize math (Canvas.tsx)
+        // is uniform-around-centre, so any corner produces the same
+        // transform — visually we draw them all so the box reads as
+        // resizable from every corner.
         const hx = wWorld / 2;
         const hy = dWorld / 2;
-        this.selectionGfx
-          .rect(hx - px(HANDLE_PX / 2), hy - px(HANDLE_PX / 2), px(HANDLE_PX), px(HANDLE_PX))
-          .fill(0xffffff)
-          .stroke({ color: SELECTION_COLOR, width: px(1.5) });
+        const corners: [number, number][] = [
+          [-hx, -hy],
+          [hx, -hy],
+          [-hx, hy],
+          [hx, hy],
+        ];
+        for (const [cxh, cyh] of corners) {
+          this.selectionGfx
+            .rect(
+              cxh - px(HANDLE_PX / 2),
+              cyh - px(HANDLE_PX / 2),
+              px(HANDLE_PX),
+              px(HANDLE_PX),
+            )
+            .fill(HANDLE_WHITE)
+            .stroke({ color: SELECTION_COLOR, width: px(1.5) });
+        }
 
-        // Rotate handle (above top edge)
+        // Rotate handle (small disc above top edge)
         const ry = -dWorld / 2 - px(20);
         this.selectionGfx
           .moveTo(0, -dWorld / 2)
@@ -141,7 +157,7 @@ export class PlacedItemsLayer extends PIXI.Container {
           .stroke({ color: SELECTION_COLOR, width: px(1) });
         this.selectionGfx
           .circle(0, ry, px(HANDLE_PX / 2))
-          .fill(0xffffff)
+          .fill(HANDLE_WHITE)
           .stroke({ color: SELECTION_COLOR, width: px(1.5) });
       }
     }
@@ -196,8 +212,17 @@ export class PlacedItemsLayer extends PIXI.Container {
     const lx = dx * Math.cos(-r) - dy * Math.sin(-r);
     const ly = dx * Math.sin(-r) + dy * Math.cos(-r);
     const tol = (HANDLE_PX + 4) / z;
-    // Resize handle at (+w/2, +d/2)
-    if (Math.abs(lx - wWorld / 2) <= tol && Math.abs(ly - dWorld / 2) <= tol) return "resize";
+    // Any of the four corners triggers the same uniform-resize math.
+    const hx = wWorld / 2;
+    const hy = dWorld / 2;
+    if (
+      (Math.abs(lx - hx) <= tol && Math.abs(ly - hy) <= tol) ||
+      (Math.abs(lx + hx) <= tol && Math.abs(ly - hy) <= tol) ||
+      (Math.abs(lx - hx) <= tol && Math.abs(ly + hy) <= tol) ||
+      (Math.abs(lx + hx) <= tol && Math.abs(ly + hy) <= tol)
+    ) {
+      return "resize";
+    }
     // Rotate handle 20px above top edge
     const ry = -dWorld / 2 - 20 / z;
     if (Math.abs(lx) <= tol && Math.abs(ly - ry) <= tol) return "rotate";

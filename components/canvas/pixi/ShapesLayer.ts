@@ -1,9 +1,9 @@
 import * as PIXI from "pixi.js";
 import type { Shape } from "@/lib/supabase/types";
 import type { Viewport } from "./Viewport";
+import { HANDLE_PX, HANDLE_WHITE, SELECTION_BLUE } from "./selection";
 
-const SELECTION_COLOR = 0x1c1917;
-const HANDLE_PX = 8;
+const SELECTION_COLOR = SELECTION_BLUE;
 
 function hexToNum(hex: string | null | undefined, fallback: number = 0x1c1917): number {
   if (!hex) return fallback;
@@ -113,16 +113,27 @@ export class ShapesLayer extends PIXI.Container {
             width: px(1.5),
             alpha: 1,
           });
-        // Resize handle (bottom-right)
-        this.selectionGfx
-          .rect(
-            bx + bw - px(HANDLE_PX / 2),
-            by + bh - px(HANDLE_PX / 2),
-            px(HANDLE_PX),
-            px(HANDLE_PX),
-          )
-          .fill(0xffffff)
-          .stroke({ color: SELECTION_COLOR, width: px(1.5) });
+        // Four corner handles. The drag math (Inspector + canvas
+        // helpers) currently treats the BR handle as the live one;
+        // the others are visual indicators that the selection is
+        // resizable, matching the Figma-style design language.
+        const corners: [number, number][] = [
+          [bx, by],
+          [bx + bw, by],
+          [bx, by + bh],
+          [bx + bw, by + bh],
+        ];
+        for (const [hx, hy] of corners) {
+          this.selectionGfx
+            .rect(
+              hx - px(HANDLE_PX / 2),
+              hy - px(HANDLE_PX / 2),
+              px(HANDLE_PX),
+              px(HANDLE_PX),
+            )
+            .fill(HANDLE_WHITE)
+            .stroke({ color: SELECTION_COLOR, width: px(1.5) });
+        }
       }
     }
     this.setChildIndex(this.selectionGfx, this.children.length - 1);
