@@ -961,7 +961,11 @@ export function Editor({ initial }: { initial: InitialData }) {
         const dxf = await convertDwgToDxf(file);
         if (!dxf) {
           alert(
-            "Could not convert this DWG. Try saving it as DXF in your CAD app and dropping that instead.",
+            "Couldn't open this DWG.\n\n" +
+              "The browser-side converter only supports DWG files saved in AutoCAD R12–R2018 formats. " +
+              "Newer 2019+ files often fail.\n\n" +
+              "Easiest fix: in your CAD app, Save As → DXF (any version) or Export as PDF. " +
+              "Drop that file instead — both render natively in Trace.",
           );
           setDwgConverting(false);
           setUploadStatus(null);
@@ -1388,43 +1392,61 @@ function FileDropOverlay({
   onUpload: (f: File) => void;
 }) {
   const [over, setOver] = useState(false);
+
+  // Drag events have to be attached to the document, not a `pointer-events:
+  // none` div — the latter is invisible to drag events, which is why the
+  // earlier overlay-based version never fired. We track a counter rather
+  // than a boolean because dragenter/dragleave both fire as the cursor
+  // crosses child elements, and the boolean approach flickers.
+  useEffect(() => {
+    let depth = 0;
+    const hasFiles = (e: DragEvent) =>
+      Array.from(e.dataTransfer?.types || []).includes("Files");
+    const onDragEnter = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth++;
+      if (depth === 1) setOver(true);
+    };
+    const onDragOver = (e: DragEvent) => {
+      if (hasFiles(e)) e.preventDefault();
+    };
+    const onDragLeave = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setOver(false);
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth = 0;
+      setOver(false);
+      const f = e.dataTransfer?.files?.[0];
+      if (f) onUpload(f);
+    };
+    document.addEventListener("dragenter", onDragEnter);
+    document.addEventListener("dragover", onDragOver);
+    document.addEventListener("dragleave", onDragLeave);
+    document.addEventListener("drop", onDrop);
+    return () => {
+      document.removeEventListener("dragenter", onDragEnter);
+      document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("dragleave", onDragLeave);
+      document.removeEventListener("drop", onDrop);
+    };
+  }, [onUpload]);
+
   return (
     <>
-      {/* Always-on file-drop catcher. pointer-events-none so it never blocks
-          measurement / note / item interactions; only enables when a drag
-          enters the window. */}
-      <div
-        onDragEnter={(e) => {
-          if (e.dataTransfer.types?.includes("Files")) setOver(true);
-        }}
-        onDragOver={(e) => {
-          if (e.dataTransfer.types?.includes("Files")) {
-            e.preventDefault();
-            setOver(true);
-          }
-        }}
-        onDragLeave={(e) => {
-          // only leave if we left the overlay container itself
-          if (e.currentTarget === e.target) setOver(false);
-        }}
-        onDrop={(e) => {
-          e.preventDefault();
-          setOver(false);
-          const f = e.dataTransfer.files?.[0];
-          if (f) onUpload(f);
-        }}
-        className={`absolute inset-0 z-20 ${
-          over ? "pointer-events-auto" : "pointer-events-none"
-        }`}
-      >
-        {over ? (
+      {over ? (
+        <div className="pointer-events-none absolute inset-0 z-20">
           <div className="m-8 flex h-[calc(100%-4rem)] flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-ink bg-panel-muted/90 text-ink backdrop-blur-sm">
             <Upload size={28} />
             <p className="font-serif text-2xl">Drop to upload</p>
             <p className="text-sm text-ink-muted">DWG, DXF, PDF, SVG, PNG, JPG</p>
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       {empty ? (
         <label className="pointer-events-auto absolute left-1/2 top-4 z-10 flex h-9 -translate-x-1/2 cursor-pointer items-center gap-1.5 rounded-md border border-dashed border-border bg-panel px-3 text-sm text-ink-muted hover:border-border-strong hover:text-ink">
