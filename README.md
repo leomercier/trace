@@ -9,7 +9,9 @@ sandbox; full multi-tenant orgs for paid teams.
 
 Live at **[tracable.dev](https://tracable.dev)**.
 
-![tracable canvas screenshot](app/public/sharecard.png)
+![tracable share card](app/public/sharecard.png)
+
+![tracable product screenshot](app/public/product-screenshot.png)
 
 > **License**: source-available under the **Elastic License 2.0** —
 > see [LICENSE](./LICENSE). You can self-host, modify, and use it
