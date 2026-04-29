@@ -26,7 +26,7 @@ export function OrgTopBar({
   return (
     <header
       className={cn(
-        "sticky top-0 z-30 border-b border-border bg-bg/80 backdrop-blur",
+        "org-top-bar sticky top-0 z-30 border-b border-border bg-bg/80 backdrop-blur",
         hideOnMobile && "hidden md:block",
       )}
     >

@@ -330,10 +330,10 @@ export function Canvas({
         const items = Object.values(state.placedItems);
         const realPerUnit = state.scale?.realPerUnit ?? null;
 
-        // Selected item handle hit test
+        // Selected item handle hit test (only if NOT locked)
         if (state.selection?.kind === "placed") {
           const sel = state.placedItems[state.selection.id];
-          if (sel) {
+          if (sel && !sel.locked) {
             const handle = a!.placedLayer.hitHandle(sel, world.x, world.y, realPerUnit);
             if (handle) {
               itemDrag = {
@@ -355,11 +355,23 @@ export function Canvas({
             }
           }
         }
-        // Plain click on an item → start move drag
+        // Plain click on an item.
         const hit = a!.placedLayer.hitTest(items, world.x, world.y, realPerUnit);
         if (hit) {
           const item = state.placedItems[hit];
+          // Shift-click: toggle membership in the multi-selection (and make
+          // it the primary selection if nothing is selected yet).
+          if (e.shiftKey) {
+            if (!state.selection || state.selection.kind !== "placed") {
+              onSelectionPick?.({ kind: "placed", id: hit });
+            } else if (state.selection.id !== hit) {
+              useEditor.getState().toggleMultiSelection(hit);
+            }
+            return;
+          }
           onSelectionPick?.({ kind: "placed", id: hit });
+          // Locked items can't be dragged — just selected.
+          if (item.locked) return;
           itemDrag = {
             mode: "move",
             id: hit,

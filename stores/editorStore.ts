@@ -30,6 +30,9 @@ export interface EditorState {
   tool: Tool;
   draft: { tool: Tool; start: Pt; end: Pt } | null;
   selection: { kind: "measurement" | "note" | "placed"; id: string } | null;
+  // Additional placed-item selections (multi-select). The primary item lives
+  // in `selection`; these are siblings.
+  multiSelection: Set<string>;
 
   // data
   measurements: Record<string, Measurement>;
@@ -69,6 +72,8 @@ export interface EditorState {
   setTool: (t: Tool) => void;
   setDraft: (d: EditorState["draft"]) => void;
   setSelection: (s: EditorState["selection"]) => void;
+  toggleMultiSelection: (id: string) => void;
+  clearMultiSelection: () => void;
   setView: (v: Partial<EditorState["view"]>) => void;
   upsertMeasurement: (m: Measurement) => void;
   removeMeasurement: (id: string) => void;
@@ -141,6 +146,7 @@ export const useEditor = create<EditorState>((set) => ({
   tool: "select",
   draft: null,
   selection: null,
+  multiSelection: new Set<string>(),
   measurements: {},
   notes: {},
   placedItems: {},
@@ -171,7 +177,16 @@ export const useEditor = create<EditorState>((set) => ({
 
   setTool: (t) => set({ tool: t, draft: null }),
   setDraft: (d) => set({ draft: d }),
-  setSelection: (s) => set({ selection: s }),
+  setSelection: (s) => set({ selection: s, multiSelection: new Set<string>() }),
+  toggleMultiSelection: (id) =>
+    set((state) => {
+      const next = new Set(state.multiSelection);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return { multiSelection: next };
+    }),
+  clearMultiSelection: () =>
+    set({ multiSelection: new Set<string>() }),
   setView: (v) =>
     set((state) => ({ view: { ...state.view, ...v } })),
 

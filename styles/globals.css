@@ -56,9 +56,10 @@ button {
   height: 100%;
 }
 
-/* Inside the editor route, suppress the org-level mobile bar — the editor
-   provides its own with hamburger + page name. */
-body.trace-in-editor .org-mobile-bar {
+/* Inside the editor route, suppress the org-level top bars — the editor
+   provides its own thin bar with hamburger + actions + profile. */
+body.trace-in-editor .org-mobile-bar,
+body.trace-in-editor .org-top-bar {
   display: none !important;
 }
 

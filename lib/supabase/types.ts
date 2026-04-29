@@ -173,6 +173,7 @@ export interface PlacedItem {
   scale_w: number;
   scale_d: number;
   z_order: number;
+  locked: boolean;
   created_by: string | null;
   created_at: string;
   updated_at: string;

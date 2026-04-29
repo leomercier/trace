@@ -45,7 +45,9 @@ export class Viewport {
 
   zoomAt(sx: number, sy: number, factor: number) {
     const before = this.screenToWorld(sx, sy);
-    const newScale = clamp(this.zoom * factor, 0.001, 1000);
+    // Wide range — feels infinite. 100,000,000× difference between min and
+    // max. The browser's float precision tops out before this matters.
+    const newScale = clamp(this.zoom * factor, 0.0001, 10000);
     this.world.scale.set(newScale, newScale);
     const after = this.screenToWorld(sx, sy);
     this.world.position.set(

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Menu, Check, Plus, ChevronLeft, Settings, LogOut } from "lucide-react";
+import { Menu, Check, Plus, ChevronLeft, Settings, LogOut, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 interface PageRow {
@@ -19,6 +19,7 @@ export function PageMenu({
   pages: initialPages,
   canEdit,
   canAdmin,
+  onDeletePage,
 }: {
   orgSlug: string;
   projectId: string;
@@ -27,6 +28,7 @@ export function PageMenu({
   pages: PageRow[];
   canEdit: boolean;
   canAdmin: boolean;
+  onDeletePage?: (id: string) => void;
 }) {
   const supabase = createClient();
   const router = useRouter();
@@ -105,11 +107,11 @@ export function PageMenu({
           </div>
           <ul className="max-h-64 overflow-y-auto py-1">
             {pages.map((p) => (
-              <li key={p.id}>
+              <li key={p.id} className="group flex items-center gap-1 pr-2">
                 <Link
                   href={`/app/${orgSlug}/${projectId}/${p.id}`}
                   onClick={() => setOpen(false)}
-                  className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-panel-muted"
+                  className="flex flex-1 items-center gap-2 px-3 py-2 text-sm hover:bg-panel-muted"
                 >
                   {p.id === currentPageId ? (
                     <Check size={14} className="text-ink" />
@@ -118,6 +120,21 @@ export function PageMenu({
                   )}
                   <span className="truncate">{p.name}</span>
                 </Link>
+                {canEdit && onDeletePage && pages.length > 1 ? (
+                  <button
+                    onClick={() => {
+                      if (confirm(`Delete page "${p.name}"? This cannot be undone.`)) {
+                        onDeletePage(p.id);
+                        setPages(pages.filter((x) => x.id !== p.id));
+                        setOpen(false);
+                      }
+                    }}
+                    title="Delete page"
+                    className="rounded p-1 text-ink-faint opacity-0 hover:bg-panel hover:text-measure group-hover:opacity-100"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                ) : null}
               </li>
             ))}
           </ul>

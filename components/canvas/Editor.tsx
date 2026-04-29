@@ -23,6 +23,7 @@ import { ShareDialog } from "@/components/panels/ShareDialog";
 import { MobileSheet } from "@/components/panels/MobileSheet";
 import { AttachmentsPanel } from "@/components/panels/AttachmentsPanel";
 import { EditorMobileBar } from "@/components/panels/EditorMobileBar";
+import { EditorTopBar } from "@/components/panels/EditorTopBar";
 import { LayersPanel } from "@/components/panels/LayersPanel";
 import { InventoryDrawer } from "@/components/inventory/InventoryDrawer";
 import { AssistantDrawer } from "@/components/assistant/AssistantDrawer";
@@ -454,6 +455,7 @@ export function Editor({ initial }: { initial: InitialData }) {
       scale_w: 1 as any,
       scale_d: 1 as any,
       z_order: 0,
+      locked: false,
       created_by: initial.user.id,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -533,6 +535,50 @@ export function Editor({ initial }: { initial: InitialData }) {
     useEditor.getState().removePlacedItem(id);
     if (id.startsWith("tmp-")) return;
     await supabase.from("placed_items").delete().eq("id", id);
+  }
+
+  async function changePlacedItemZ(
+    id: string,
+    mode: "front" | "back" | "forward" | "backward",
+  ) {
+    const items = Object.values(useEditor.getState().placedItems);
+    const sorted = items.sort(
+      (a, b) =>
+        Number(a.z_order ?? 0) - Number(b.z_order ?? 0) ||
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    );
+    const idx = sorted.findIndex((i) => i.id === id);
+    if (idx < 0) return;
+    let newZ: number;
+    if (mode === "front") {
+      newZ = (Number(sorted[sorted.length - 1].z_order ?? 0) || 0) + 1;
+    } else if (mode === "back") {
+      newZ = (Number(sorted[0].z_order ?? 0) || 0) - 1;
+    } else if (mode === "forward") {
+      const above = sorted[idx + 1];
+      newZ = above ? Number(above.z_order ?? 0) + 1 : Number(sorted[idx].z_order ?? 0) + 1;
+    } else {
+      const below = sorted[idx - 1];
+      newZ = below ? Number(below.z_order ?? 0) - 1 : Number(sorted[idx].z_order ?? 0) - 1;
+    }
+    await updatePlacedItem(id, { z_order: newZ as any });
+  }
+
+  async function onDeletePage(pageId: string) {
+    // Server delete via cascade (RLS-gated). After delete, navigate to a
+    // sibling page if available, else back to the project.
+    const others = initial.pages.filter((p) => p.id !== pageId);
+    await supabase.from("pages").delete().eq("id", pageId);
+    if (pageId === initial.page.id) {
+      const next = others[0]?.id;
+      if (next) {
+        window.location.href = `/app/${initial.orgSlug}/${initial.projectId}/${next}`;
+      } else {
+        window.location.href = `/app/${initial.orgSlug}/${initial.projectId}`;
+      }
+    } else {
+      window.location.reload();
+    }
   }
 
   async function onUploadFile(file: File) {
@@ -664,7 +710,26 @@ export function Editor({ initial }: { initial: InitialData }) {
   }
 
   return (
-    <div className="flex h-screen w-full flex-col md:h-[calc(100vh-57px)] md:flex-row">
+    <div className="flex h-screen w-full flex-col">
+      <div className="hidden md:block">
+        <EditorTopBar
+          orgSlug={initial.orgSlug}
+          projectId={initial.projectId}
+          projectName={initial.projectName}
+          currentPageId={initial.page.id}
+          currentPageName={initial.page.name}
+          pages={initial.pages}
+          user={initial.user}
+          role={initial.role}
+          presence={presence}
+          onFit={() => canvasApi.current?.fitToContent()}
+          onInventory={() => setInventoryOpen(true)}
+          onAssistant={() => setAssistantOpen(true)}
+          onShare={() => setShareOpen(true)}
+          onDeletePage={onDeletePage}
+        />
+      </div>
+      <div className="flex min-h-0 w-full flex-1 flex-col md:flex-row">
       <EditorMobileBar
         orgSlug={initial.orgSlug}
         projectId={initial.projectId}
@@ -699,54 +764,6 @@ export function Editor({ initial }: { initial: InitialData }) {
           onDelete={deleteNote}
         />
         <Toolbar />
-
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between p-3">
-          <div className="pointer-events-auto flex items-center gap-2">
-            {!initial.signedUrl && initial.role !== "viewer" ? (
-              <UploadButton onUpload={onUploadFile} />
-            ) : null}
-            <button
-              onClick={() => canvasApi.current?.fitToContent()}
-              title="Fit to content (F)"
-              className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-panel px-3 text-sm hover:border-border-strong"
-            >
-              <Maximize2 size={14} /> Fit
-            </button>
-          </div>
-          <div className="pointer-events-auto flex items-center gap-2">
-            {initial.role !== "viewer" ? (
-              <button
-                onClick={() => setInventoryOpen(true)}
-                title="Inventory (⌘I)"
-                className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-panel px-3 text-sm hover:border-border-strong"
-              >
-                <Package size={14} /> <span className="hidden md:inline">Inventory</span>
-              </button>
-            ) : null}
-            <button
-              onClick={() => setAssistantOpen(true)}
-              title="Ask AI (⌘K)"
-              className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-panel px-3 text-sm hover:border-border-strong"
-              style={{ color: "#7c3aed" }}
-            >
-              <Sparkles size={14} /> <span className="hidden md:inline">Ask AI</span>
-            </button>
-            <PresenceStack me={initial.user.id} users={presence} />
-            {(initial.role === "owner" || initial.role === "admin") && (
-              <button
-                onClick={() => setShareOpen(true)}
-                className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-panel px-3 text-sm hover:border-border-strong"
-              >
-                <Share2 size={14} /> <span className="hidden md:inline">Share</span>
-              </button>
-            )}
-            {initial.role === "viewer" ? (
-              <span className="rounded-md border border-border bg-panel px-2 py-1 text-[11px] uppercase tracking-wider text-ink-muted">
-                Viewing
-              </span>
-            ) : null}
-          </div>
-        </div>
 
         {initial.role !== "viewer" && !dwgConverting ? (
           <FileDropOverlay
@@ -825,6 +842,7 @@ export function Editor({ initial }: { initial: InitialData }) {
         onRenameMeasurement={renameMeasurement}
         onDeleteMeasurement={deleteMeasurement}
         onUpdatePlacedItem={updatePlacedItem}
+        onChangePlacedItemZ={changePlacedItemZ}
         onExportPng={exportPng}
         onDeleteSelection={() => {
           const sel = useEditor.getState().selection;
@@ -844,6 +862,7 @@ export function Editor({ initial }: { initial: InitialData }) {
           </Button>
         }
       />
+      </div>
     </div>
   );
 }

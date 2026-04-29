@@ -4,7 +4,17 @@ import { useEditor } from "@/stores/editorStore";
 import { formatLength, type Unit } from "@/lib/utils/units";
 import { useState } from "react";
 import type { Measurement, PlacedItem } from "@/lib/supabase/types";
-import { Trash2, RotateCw, Download } from "lucide-react";
+import {
+  Trash2,
+  RotateCw,
+  Download,
+  Lock,
+  Unlock,
+  ChevronUp,
+  ChevronDown,
+  ChevronsUp,
+  ChevronsDown,
+} from "lucide-react";
 
 export function Inspector({
   pageName,
@@ -13,6 +23,7 @@ export function Inspector({
   onRenameMeasurement,
   onDeleteMeasurement,
   onUpdatePlacedItem,
+  onChangePlacedItemZ,
   onExportPng,
   scaleControls,
 }: {
@@ -22,6 +33,7 @@ export function Inspector({
   onRenameMeasurement: (id: string, label: string | null) => void;
   onDeleteMeasurement: (id: string) => void;
   onUpdatePlacedItem: (id: string, patch: Partial<PlacedItem>) => void;
+  onChangePlacedItemZ: (id: string, mode: "front" | "back" | "forward" | "backward") => void;
   onExportPng: () => void;
   scaleControls: React.ReactNode;
 }) {
@@ -145,6 +157,7 @@ export function Inspector({
             scale={scale}
             canEdit={canEdit}
             onUpdate={(patch) => onUpdatePlacedItem(placedSel.id, patch)}
+            onChangeZ={(mode) => onChangePlacedItemZ(placedSel.id, mode)}
             onDelete={onDeleteSelection}
           />
         </div>
@@ -382,12 +395,14 @@ function PlacedItemProperties({
   scale,
   canEdit,
   onUpdate,
+  onChangeZ,
   onDelete,
 }: {
   item: PlacedItem;
   scale: { realPerUnit: number; unit: Unit } | null;
   canEdit: boolean;
   onUpdate: (patch: Partial<PlacedItem>) => void;
+  onChangeZ: (mode: "front" | "back" | "forward" | "backward") => void;
   onDelete: () => void;
 }) {
   const w = item.width_mm * (Number(item.scale_w) || 1);
@@ -396,12 +411,31 @@ function PlacedItemProperties({
   const unit = scale?.unit || "mm";
   const areaM2 = (w / 1000) * (d / 1000);
   const rotation = Math.round((((Number(item.rotation) || 0) % 360) + 360) % 360);
+  const editable = canEdit && !item.locked;
 
   return (
     <div className="mt-3 space-y-3">
-      <div>
-        <div className="text-sm font-medium">{item.name}</div>
-        {item.brand ? <div className="text-xs text-ink-muted">{item.brand}</div> : null}
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium">{item.name}</div>
+          {item.brand ? (
+            <div className="truncate text-xs text-ink-muted">{item.brand}</div>
+          ) : null}
+        </div>
+        {canEdit ? (
+          <button
+            onClick={() => onUpdate({ locked: !item.locked })}
+            title={item.locked ? "Unlock" : "Lock"}
+            className={`flex h-7 items-center gap-1 rounded border px-2 text-xs ${
+              item.locked
+                ? "border-ink bg-ink text-white"
+                : "border-border bg-panel-muted text-ink-muted hover:text-ink"
+            }`}
+          >
+            {item.locked ? <Lock size={11} /> : <Unlock size={11} />}
+            {item.locked ? "Locked" : "Lock"}
+          </button>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-3 gap-2">
@@ -409,14 +443,14 @@ function PlacedItemProperties({
           label="W"
           unit={unit}
           mm={w}
-          editable={canEdit}
+          editable={editable}
           onCommit={(newMm) => onUpdate({ scale_w: newMm / item.width_mm })}
         />
         <DimField
           label="D"
           unit={unit}
           mm={d}
-          editable={canEdit}
+          editable={editable}
           onCommit={(newMm) => onUpdate({ scale_d: newMm / item.depth_mm })}
         />
         <DimField label="H" unit={unit} mm={h} editable={false} />
@@ -427,12 +461,10 @@ function PlacedItemProperties({
         <Pair label="Rotation" v={`${rotation}°`} />
       </div>
 
-      {canEdit ? (
+      {editable ? (
         <div className="flex items-center gap-2">
           <button
-            onClick={() =>
-              onUpdate({ rotation: ((Number(item.rotation) || 0) + 90) % 360 })
-            }
+            onClick={() => onUpdate({ rotation: ((Number(item.rotation) || 0) + 90) % 360 })}
             className="flex h-8 items-center gap-1 rounded border border-border bg-panel-muted px-2 text-xs hover:bg-panel"
           >
             <RotateCw size={12} /> 90°
@@ -443,15 +475,52 @@ function PlacedItemProperties({
           >
             Reset size
           </button>
-          <button
-            onClick={onDelete}
-            className="ml-auto text-xs text-measure underline underline-offset-4 hover:no-underline"
-          >
-            Delete
-          </button>
         </div>
       ) : null}
+
+      {canEdit ? (
+        <div>
+          <div className="mb-1 text-[10px] uppercase tracking-wider text-ink-faint">
+            Layer order
+          </div>
+          <div className="grid grid-cols-4 gap-1">
+            <ZBtn label="To back" onClick={() => onChangeZ("back")} icon={<ChevronsDown size={12} />} />
+            <ZBtn label="Backward" onClick={() => onChangeZ("backward")} icon={<ChevronDown size={12} />} />
+            <ZBtn label="Forward" onClick={() => onChangeZ("forward")} icon={<ChevronUp size={12} />} />
+            <ZBtn label="To front" onClick={() => onChangeZ("front")} icon={<ChevronsUp size={12} />} />
+          </div>
+        </div>
+      ) : null}
+
+      {canEdit ? (
+        <button
+          onClick={onDelete}
+          className="text-xs text-measure underline underline-offset-4 hover:no-underline"
+        >
+          Delete item
+        </button>
+      ) : null}
     </div>
+  );
+}
+
+function ZBtn({
+  label,
+  icon,
+  onClick,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      className="flex h-8 flex-col items-center justify-center rounded border border-border bg-panel-muted text-[9px] hover:bg-panel"
+    >
+      {icon}
+    </button>
   );
 }
 
