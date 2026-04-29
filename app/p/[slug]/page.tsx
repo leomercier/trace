@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/server";
@@ -7,6 +8,73 @@ import { ShareViewer } from "./ShareViewer";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Generate the share-card metadata so anyone pasting a /p/{slug} URL into
+ * Slack / iMessage / WhatsApp / Twitter sees a proper preview with the
+ * project / page name and a generated cover image. The image itself is
+ * served by the sibling opengraph-image.tsx route.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: { slug: string };
+}): Promise<Metadata> {
+  const svc = createServiceClient();
+  const { data: share } = await svc
+    .from("public_shares")
+    .select("scope, project_id, page_id")
+    .eq("slug", params.slug)
+    .maybeSingle();
+  if (!share) {
+    return { title: "trace — shared workspace" };
+  }
+  let title = "trace — shared workspace";
+  let description = "Open source design and prototyping. Anyone with this link can collaborate.";
+  if (share.scope === "page" && share.page_id) {
+    const { data: page } = await svc
+      .from("pages")
+      .select("name, projects:project_id (name)")
+      .eq("id", share.page_id)
+      .maybeSingle();
+    const pageName = page?.name || "Untitled page";
+    const projectName = (page as any)?.projects?.name || "trace";
+    title = `${pageName} · ${projectName}`;
+    description = `Shared on trace · ${projectName}`;
+  } else if (share.scope === "project" && share.project_id) {
+    const { data: project } = await svc
+      .from("projects")
+      .select("name, description")
+      .eq("id", share.project_id)
+      .maybeSingle();
+    title = project?.name || title;
+    description = project?.description || description;
+  }
+  return {
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      type: "article",
+      images: [
+        {
+          // Resolved by app/p/[slug]/opengraph-image.tsx at request time.
+          url: `/p/${params.slug}/opengraph-image`,
+          width: 1200,
+          height: 630,
+          alt: title,
+        },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: [`/p/${params.slug}/opengraph-image`],
+    },
+  };
+}
 
 export default async function PublicSharePage({
   params,

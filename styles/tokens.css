@@ -23,9 +23,9 @@
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
-  --font-serif: "Fraunces", Georgia, serif;
-  --font-sans: "Inter", -apple-system, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-serif: var(--font-geist-sans), -apple-system, system-ui, sans-serif;
+  --font-sans: var(--font-geist-sans), -apple-system, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
   --font-hand: "Caveat", cursive;
 
   /* trace — Brand Kit v1.0 */
@@ -41,11 +41,10 @@
   --trace-warning: #F59E0B;
   --trace-error: #EF4444;
 
-  /* Söhne Breit is a paid display face from Klim. If self-hosted on the
-     project, it takes precedence; otherwise next/font's Bricolage Grotesque
-     is the closest free alternative for the wide grotesque character. */
-  --font-display: "Söhne Breit", var(--font-bricolage), "Inter",
-    -apple-system, system-ui, sans-serif;
+  /* Display face. Geist Sans handles both body and display in the new design;
+     `font-display` retained as an alias so existing markup that references
+     it doesn't break. */
+  --font-display: var(--font-geist-sans), -apple-system, system-ui, sans-serif;
 
   --space-1: 4px;
   --space-2: 8px;

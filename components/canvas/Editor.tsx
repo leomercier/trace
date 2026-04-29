@@ -1152,10 +1152,17 @@ export function Editor({ initial }: { initial: InitialData }) {
   return (
     <div className="flex h-screen w-full flex-col">
       {editorLoading ? (
-        <div className="pointer-events-auto fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-bg/95 backdrop-blur-sm">
-          <div className="size-10 animate-spin rounded-full border-2 border-ink border-r-transparent" />
-          <div className="font-serif text-2xl text-ink">Loading workspace…</div>
-          <div className="text-sm text-ink-muted">{initial.page.name}</div>
+        <div className="pointer-events-auto fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-trace-white">
+          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-trace-black/50">
+            Setting up canvas
+          </div>
+          <div className="text-[28px] font-semibold tracking-tight text-trace-black md:text-[40px]">
+            trace
+          </div>
+          <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.18em] text-trace-black/60">
+            <div className="size-1.5 animate-pulse rounded-full bg-trace-black" />
+            <span>{initial.page.name}</span>
+          </div>
         </div>
       ) : null}
       {/* Floating corner controls — replaces the old EditorTopBar. The

@@ -1,43 +1,33 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import {
-  MousePointer2,
-  Hand,
-  Ruler,
-  StickyNote,
-  Crosshair,
-  ChevronRight,
-  Paperclip,
-  Download,
-  Maximize2,
-  Type,
-  Slash,
-  Square,
-} from "lucide-react";
+import { Slash } from "lucide-react";
+import { Icon, type IconName } from "@/components/ui/Icon";
 import { useEditor, type Tool } from "@/stores/editorStore";
 import { cn } from "@/lib/utils/cn";
 
 const TOOLS: {
   id: Tool;
   label: string;
-  icon: typeof Hand;
+  icon: IconName;
   key: string;
   viewerOk?: boolean;
 }[] = [
-  { id: "select", label: "Select", icon: MousePointer2, key: "V", viewerOk: true },
-  { id: "pan", label: "Pan", icon: Hand, key: "H", viewerOk: true },
-  { id: "measure", label: "Measure", icon: Ruler, key: "M" },
-  { id: "note", label: "Note", icon: StickyNote, key: "N" },
-  { id: "text", label: "Text", icon: Type, key: "T" },
-  { id: "line", label: "Line", icon: Slash, key: "L" },
-  { id: "rect", label: "Rectangle", icon: Square, key: "R" },
+  { id: "select", label: "Select", icon: "cursor", key: "V", viewerOk: true },
+  { id: "pan", label: "Pan", icon: "hand", key: "H", viewerOk: true },
+  { id: "measure", label: "Measure", icon: "measure", key: "M" },
+  { id: "note", label: "Note", icon: "note", key: "N" },
+  { id: "text", label: "Text", icon: "text", key: "T" },
+  // No "line" in the Hugeicons free set yet — keep lucide's Slash here
+  // until we either find a dedicated diagonal-line icon or vendor an SVG.
+  { id: "line", label: "Line", icon: "line" as IconName, key: "L" },
+  { id: "rect", label: "Rectangle", icon: "rect", key: "R" },
 ];
 
 // Tools surfaced in the overflow menu (chevron on the right of the toolbar)
 // rather than inline. Keeps the main bar narrow enough for a 375pt phone.
-const OVERFLOW_TOOLS: { id: Tool; label: string; icon: typeof Hand; key: string }[] = [
-  { id: "calibrate", label: "Calibrate", icon: Crosshair, key: "C" },
+const OVERFLOW_TOOLS: { id: Tool; label: string; icon: IconName; key: string }[] = [
+  { id: "calibrate", label: "Calibrate", icon: "calibrate", key: "C" },
 ];
 
 export function Toolbar({
@@ -96,7 +86,11 @@ export function Toolbar({
               tool === t.id && "bg-ink text-white hover:bg-ink hover:text-white",
             )}
           >
-            <t.icon size={16} />
+            {t.id === "line" ? (
+              <Slash size={16} />
+            ) : (
+              <Icon name={t.icon} size={16} />
+            )}
           </button>
         ))}
 
@@ -110,9 +104,10 @@ export function Toolbar({
               moreOpen && "bg-panel-muted text-ink",
             )}
           >
-            <ChevronRight
+            <Icon
+              name="more"
               size={16}
-              className={cn("transition-transform", moreOpen && "rotate-180")}
+              className={cn("transition-transform", moreOpen && "rotate-90")}
             />
             {attachmentCount > 0 ? (
               <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-measure px-1 font-num text-[10px] text-white">
@@ -139,7 +134,7 @@ export function Toolbar({
                     tool === t.id ? "bg-ink text-white hover:bg-ink" : "text-ink-muted hover:text-ink",
                   )}
                 >
-                  <t.icon size={16} />
+                  <Icon name={t.icon} size={16} />
                   <span>{t.label}</span>
                 </button>
               ))}
@@ -152,7 +147,7 @@ export function Toolbar({
                   className="flex h-10 flex-col items-center justify-center gap-0.5 rounded px-2 text-[10px] text-ink-muted hover:bg-panel-muted hover:text-ink"
                   title="Attachments"
                 >
-                  <Paperclip size={16} />
+                  <Icon name="upload" size={16} />
                   <span>
                     Files{attachmentCount > 0 ? ` · ${attachmentCount}` : ""}
                   </span>
@@ -167,7 +162,7 @@ export function Toolbar({
                   className="flex h-10 flex-col items-center justify-center gap-0.5 rounded px-2 text-[10px] text-ink-muted hover:bg-panel-muted hover:text-ink"
                   title="Fit to content"
                 >
-                  <Maximize2 size={16} />
+                  <Icon name="crop" size={16} />
                   <span>Fit</span>
                 </button>
               ) : null}
@@ -180,7 +175,7 @@ export function Toolbar({
                   className="flex h-10 flex-col items-center justify-center gap-0.5 rounded px-2 text-[10px] text-ink-muted hover:bg-panel-muted hover:text-ink"
                   title="Export PNG"
                 >
-                  <Download size={16} />
+                  <Icon name="download" size={16} />
                   <span>Export</span>
                 </button>
               ) : null}
