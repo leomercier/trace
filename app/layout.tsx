@@ -1,11 +1,17 @@
 import type { Metadata } from "next";
-import { Fraunces, Inter, JetBrains_Mono, Caveat } from "next/font/google";
+import { Fraunces, Inter, JetBrains_Mono, Caveat, Bricolage_Grotesque } from "next/font/google";
 import "@/styles/globals.css";
 
 const fraunces = Fraunces({ subsets: ["latin"], variable: "--font-serif", display: "swap" });
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
 const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono", display: "swap" });
 const caveat = Caveat({ subsets: ["latin"], variable: "--font-hand", display: "swap" });
+const bricolage = Bricolage_Grotesque({
+  subsets: ["latin"],
+  variable: "--font-bricolage",
+  display: "swap",
+  weight: ["400", "500", "600", "700", "800"],
+});
 
 export const metadata: Metadata = {
   title: "Trace — measure & annotate drawings, together",
@@ -25,7 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="en"
-      className={`${fraunces.variable} ${inter.variable} ${mono.variable} ${caveat.variable}`}
+      className={`${fraunces.variable} ${inter.variable} ${mono.variable} ${caveat.variable} ${bricolage.variable}`}
     >
       <body>{children}</body>
     </html>

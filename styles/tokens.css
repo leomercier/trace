@@ -13,6 +13,10 @@
   --note: #fef3c7;
   --note-border: #fcd34d;
   --grid: #f5f5f4;
+  --cursor-1: #2563eb;
+  --cursor-2: #d97706;
+  --cursor-3: #16a34a;
+  --cursor-4: #db2777;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 1px rgba(0, 0, 0, 0.02);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
   --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.15);
@@ -23,4 +27,32 @@
   --font-sans: "Inter", -apple-system, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
   --font-hand: "Caveat", cursive;
+
+  /* trace — Brand Kit v1.0 */
+  --trace-black: #0B0D10;
+  --trace-white: #F5F7FA;
+  --trace-pink: #FF4DA6;
+  --trace-orange: #FF5A1F;
+  --trace-violet: #6D5DF6;
+  --trace-lime: #C7FF3F;
+  --trace-plum: #3B0D1E;
+  --trace-success: #00D084;
+  --trace-info: #3B82F6;
+  --trace-warning: #F59E0B;
+  --trace-error: #EF4444;
+
+  /* Söhne Breit is a paid display face from Klim. If self-hosted on the
+     project, it takes precedence; otherwise next/font's Bricolage Grotesque
+     is the closest free alternative for the wide grotesque character. */
+  --font-display: "Söhne Breit", var(--font-bricolage), "Inter",
+    -apple-system, system-ui, sans-serif;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 32px;
+  --space-6: 48px;
+  --space-7: 64px;
+  --space-8: 96px;
 }

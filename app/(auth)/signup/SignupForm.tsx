@@ -74,10 +74,16 @@ export function SignupForm() {
 
   if (sent) {
     return (
-      <div className="rounded-md border border-border bg-panel p-6">
-        <h2 className="font-serif text-2xl">Check your email</h2>
-        <p className="mt-2 text-ink-muted">
-          We sent a confirmation link to <span className="text-ink">{email}</span>.
+      <div className="rounded-md border border-trace-black/15 bg-trace-white p-6">
+        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-trace-black/50">
+          Confirmation sent
+        </div>
+        <h2 className="mt-2 font-display text-2xl font-semibold">
+          Check your email
+        </h2>
+        <p className="mt-2 text-trace-black/70">
+          We sent a confirmation link to{" "}
+          <span className="text-trace-black">{email}</span>.
         </p>
       </div>
     );
@@ -96,18 +102,19 @@ export function SignupForm() {
           />
         </div>
       ) : (
-        <div className="rounded-md border border-border bg-panel-muted p-3 text-sm text-ink-muted">
-          You are accepting an invite. We&rsquo;ll add you to the existing workspace.
+        <div className="rounded-md border border-trace-black/15 bg-trace-black/5 p-3 text-sm text-trace-black/70">
+          You are accepting an invite. We&rsquo;ll add you to the existing
+          workspace.
         </div>
       )}
 
       <Button onClick={onGoogle} variant="secondary" size="lg" className="w-full">
         <GoogleIcon /> Continue with Google
       </Button>
-      <div className="flex items-center gap-3 text-xs text-ink-faint">
-        <span className="h-px flex-1 bg-border" />
-        OR
-        <span className="h-px flex-1 bg-border" />
+      <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.18em] text-trace-black/50">
+        <span className="h-px flex-1 bg-trace-black/15" />
+        Or
+        <span className="h-px flex-1 bg-trace-black/15" />
       </div>
       <form onSubmit={onMagicLink} className="space-y-3">
         <div>
@@ -122,7 +129,7 @@ export function SignupForm() {
             placeholder="you@studio.com"
           />
         </div>
-        {error ? <p className="text-sm text-measure">{error}</p> : null}
+        {error ? <p className="text-sm text-trace-error">{error}</p> : null}
         <Button type="submit" size="lg" loading={loading} className="w-full">
           Continue
         </Button>

@@ -1,8 +1,9 @@
 import { Suspense } from "react";
-import { LoginForm } from "./LoginForm";
 import Link from "next/link";
+import { LoginForm } from "./LoginForm";
+import { AuthShell } from "@/components/marketing/AuthShell";
 
-export const metadata = { title: "Sign in — Trace" };
+export const metadata = { title: "Sign in — trace" };
 export const dynamic = "force-dynamic";
 
 export default function LoginPage({
@@ -12,36 +13,45 @@ export default function LoginPage({
 }) {
   const rawError = searchParams.error;
   const friendlyError = rawError ? friendlyAuthError(rawError) : null;
+
   return (
-    <main className="min-h-screen bg-bg">
-      <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
-        <Link href="/" className="font-serif text-2xl tracking-tight">
-          trace
-        </Link>
-      </header>
-      <div className="mx-auto flex w-full max-w-md flex-col px-6 pt-16">
-        <h1 className="font-serif text-4xl tracking-tight">Welcome back</h1>
-        <p className="mt-2 text-ink-muted">Sign in to your workspace.</p>
-        {friendlyError ? (
-          <div className="mt-6 rounded-md border border-border bg-panel p-4 text-sm">
-            <p className="font-medium text-measure">{friendlyError.headline}</p>
-            <p className="mt-1 text-ink-muted">{friendlyError.body}</p>
-          </div>
-        ) : null}
-        <div className="mt-10">
-          <Suspense fallback={<div className="h-40" />}>
-            <LoginForm />
-          </Suspense>
+    <AuthShell
+      index="01"
+      label="Sign in"
+      title={
+        <>
+          Welcome
+          <br />
+          back.
+        </>
+      }
+      intro="Sign in to your workspace. Magic link or Google — your call."
+      footer={<>MIT licensed · Open source · Self-host or hosted</>}
+    >
+      {friendlyError ? (
+        <div className="mb-6 rounded-md border border-trace-error/40 bg-trace-error/5 p-4 text-sm">
+          <p className="font-medium text-trace-error">
+            {friendlyError.headline}
+          </p>
+          <p className="mt-1 text-trace-black/70">{friendlyError.body}</p>
         </div>
-        <p className="mt-8 text-sm text-ink-muted">
-          New to Trace?{" "}
-          <Link href="/signup" className="text-ink underline">
-            Create an account
-          </Link>
-          .
-        </p>
-      </div>
-    </main>
+      ) : null}
+
+      <Suspense fallback={<div className="h-40" />}>
+        <LoginForm />
+      </Suspense>
+
+      <p className="mt-8 text-sm text-trace-black/70">
+        New to trace?{" "}
+        <Link
+          href="/signup"
+          className="font-medium text-trace-black underline underline-offset-4 decoration-trace-black/40 hover:decoration-trace-black"
+        >
+          Create an account
+        </Link>
+        .
+      </p>
+    </AuthShell>
   );
 }
 
