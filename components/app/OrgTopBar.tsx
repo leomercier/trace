@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ChevronDown, LogOut, Settings } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
+import { TraceWordmark } from "@/components/marketing/TraceLogo";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils/cn";
 
@@ -32,8 +33,8 @@ export function OrgTopBar({
     >
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
         <div className="flex items-center gap-3">
-          <Link href="/app" className="font-serif text-xl">
-            tracable
+          <Link href="/app" aria-label="tracable home">
+            <TraceWordmark logoSize={20} />
           </Link>
           <span className="text-ink-faint">/</span>
           <Link
