@@ -24,8 +24,6 @@ export function LayersPanel({
   onDelete: (id: string) => void;
 }) {
   const drawings = useEditor((s) => s.drawings);
-  const layers = useEditor((s) => s.layers);
-  const toggleLayer = useEditor((s) => s.toggleLayer);
   const [open, setOpen] = useState(true);
 
   const drawingList = Object.values(drawings).sort(
@@ -132,34 +130,6 @@ export function LayersPanel({
                 ))}
               </ul>
             )}
-          </section>
-
-          <section>
-            <div className="mb-2 text-[11px] uppercase tracking-wider text-ink-faint">
-              Annotations
-            </div>
-            <ul className="space-y-1">
-              {(["measurements", "notes", "items", "shapes", "cursors"] as const).map((k) => (
-                <li
-                  key={k}
-                  className="flex items-center gap-2 rounded px-2 py-2 text-sm hover:bg-panel-muted"
-                >
-                  <button
-                    onClick={() => toggleLayer(k)}
-                    className="text-ink-muted hover:text-ink"
-                  >
-                    {layers[k] ? <Eye size={14} /> : <EyeOff size={14} />}
-                  </button>
-                  <span
-                    className={`flex-1 capitalize ${
-                      layers[k] ? "" : "text-ink-faint"
-                    }`}
-                  >
-                    {k}
-                  </span>
-                </li>
-              ))}
-            </ul>
           </section>
         </div>
       ) : null}

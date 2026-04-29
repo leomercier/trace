@@ -506,11 +506,14 @@ export function Editor({ initial }: { initial: InitialData }) {
     h: number;
     text?: string;
   }) {
-    const optimisticId = `tmp-${crypto.randomUUID()}`;
+    // Use a real UUID up front — no tmp/swap dance. If the insert fails
+    // (table missing, RLS blocked, network), we revert and surface the
+    // error instead of silently dropping the user's shape.
+    const id = crypto.randomUUID();
     const isText = args.kind === "text";
     const isLine = args.kind === "line";
     const optimistic: Shape = {
-      id: optimisticId,
+      id,
       page_id: initial.page.id,
       kind: args.kind,
       x: args.x as any,
@@ -521,7 +524,7 @@ export function Editor({ initial }: { initial: InitialData }) {
       stroke: "#1c1917",
       stroke_width: isLine ? 2 : 1.5,
       stroke_opacity: 1,
-      fill: isText ? null : args.kind === "rect" ? null : null,
+      fill: null,
       fill_opacity: 1,
       text: args.text ?? null,
       style: isText ? { font: "Inter", size: 24, color: "#1c1917" } : null,
@@ -532,12 +535,13 @@ export function Editor({ initial }: { initial: InitialData }) {
       updated_at: new Date().toISOString(),
     };
     useEditor.getState().upsertShape(optimistic);
-    useEditor.getState().setSelection({ kind: "shape", id: optimisticId });
+    useEditor.getState().setSelection({ kind: "shape", id });
     useEditor.getState().setTool("select");
 
     const { data, error } = await supabase
       .from("shapes")
       .insert({
+        id,
         page_id: initial.page.id,
         kind: optimistic.kind,
         x: optimistic.x,
@@ -552,12 +556,18 @@ export function Editor({ initial }: { initial: InitialData }) {
       })
       .select("*")
       .single();
-    useEditor.getState().removeShape(optimisticId);
-    if (!error && data) {
+    if (error) {
+      console.error("[trace] failed to create shape:", error);
+      useEditor.getState().removeShape(id);
+      alert(
+        `Couldn't save the ${args.kind}: ${error.message}\n\n` +
+          "If this is a new project, run supabase/bootstrap.sql in Supabase Studio, then redeploy.",
+      );
+      return;
+    }
+    if (data) {
       useEditor.getState().upsertShape(data as Shape);
-      useEditor.getState().setSelection({ kind: "shape", id: (data as any).id });
-      const newId = (data as any).id as string;
-      pushUndo(() => deleteShape(newId));
+      pushUndo(() => deleteShape(id));
     }
   }
 
@@ -577,9 +587,9 @@ export function Editor({ initial }: { initial: InitialData }) {
 
   async function createMeasurement(a: { x: number; y: number }, b: { x: number; y: number }) {
     const s = useEditor.getState();
-    const optimisticId = `tmp-${crypto.randomUUID()}`;
+    const id = crypto.randomUUID();
     const optimistic: Measurement = {
-      id: optimisticId,
+      id,
       page_id: initial.page.id,
       ax: a.x as any,
       ay: a.y as any,
@@ -596,6 +606,7 @@ export function Editor({ initial }: { initial: InitialData }) {
     const { data, error } = await supabase
       .from("measurements")
       .insert({
+        id,
         page_id: initial.page.id,
         ax: a.x,
         ay: a.y,
@@ -604,11 +615,15 @@ export function Editor({ initial }: { initial: InitialData }) {
       })
       .select("*")
       .single();
-    s.removeMeasurement(optimisticId);
-    if (!error && data) {
+    if (error) {
+      console.error("[trace] failed to create measurement:", error);
+      s.removeMeasurement(id);
+      alert(`Couldn't save measurement: ${error.message}`);
+      return;
+    }
+    if (data) {
       s.upsertMeasurement(data as any);
-      const newId = (data as any).id as string;
-      pushUndo(() => deleteMeasurement(newId));
+      pushUndo(() => deleteMeasurement(id));
     }
   }
 
@@ -624,9 +639,9 @@ export function Editor({ initial }: { initial: InitialData }) {
   }
 
   async function createNote(p: { x: number; y: number }) {
-    const optimisticId = `tmp-${crypto.randomUUID()}`;
+    const id = crypto.randomUUID();
     const optimistic: Note = {
-      id: optimisticId,
+      id,
       page_id: initial.page.id,
       x: p.x as any,
       y: p.y as any,
@@ -643,6 +658,7 @@ export function Editor({ initial }: { initial: InitialData }) {
     const { data, error } = await supabase
       .from("notes")
       .insert({
+        id,
         page_id: initial.page.id,
         x: p.x,
         y: p.y,
@@ -652,11 +668,15 @@ export function Editor({ initial }: { initial: InitialData }) {
       })
       .select("*")
       .single();
-    useEditor.getState().removeNote(optimisticId);
-    if (!error && data) {
+    if (error) {
+      console.error("[trace] failed to create note:", error);
+      useEditor.getState().removeNote(id);
+      alert(`Couldn't save note: ${error.message}`);
+      return;
+    }
+    if (data) {
       useEditor.getState().upsertNote(data as any);
-      const newId = (data as any).id as string;
-      pushUndo(() => deleteNote(newId));
+      pushUndo(() => deleteNote(id));
     }
   }
 
@@ -704,9 +724,9 @@ export function Editor({ initial }: { initial: InitialData }) {
 
   async function placeItem(inv: InventoryItem, world: { x: number; y: number }) {
     if (initial.role === "viewer") return;
-    const optimisticId = `tmp-${crypto.randomUUID()}`;
+    const id = crypto.randomUUID();
     const optimistic: PlacedItem = {
-      id: optimisticId,
+      id,
       page_id: initial.page.id,
       inventory_item_id: inv.id,
       name: inv.name,
@@ -727,11 +747,12 @@ export function Editor({ initial }: { initial: InitialData }) {
       updated_at: new Date().toISOString(),
     };
     useEditor.getState().upsertPlacedItem(optimistic);
-    useEditor.getState().setSelection({ kind: "placed", id: optimisticId });
+    useEditor.getState().setSelection({ kind: "placed", id });
 
     const { data, error } = await supabase
       .from("placed_items")
       .insert({
+        id,
         page_id: initial.page.id,
         inventory_item_id: inv.id,
         name: inv.name,
@@ -745,12 +766,15 @@ export function Editor({ initial }: { initial: InitialData }) {
       })
       .select("*")
       .single();
-    useEditor.getState().removePlacedItem(optimisticId);
-    if (!error && data) {
+    if (error) {
+      console.error("[trace] failed to place item:", error);
+      useEditor.getState().removePlacedItem(id);
+      alert(`Couldn't place item: ${error.message}`);
+      return;
+    }
+    if (data) {
       useEditor.getState().upsertPlacedItem(data as PlacedItem);
-      useEditor.getState().setSelection({ kind: "placed", id: (data as any).id });
-      const newId = (data as any).id as string;
-      pushUndo(() => deletePlacedItem(newId));
+      pushUndo(() => deletePlacedItem(id));
     }
   }
 
