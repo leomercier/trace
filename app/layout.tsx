@@ -19,12 +19,22 @@ export const metadata: Metadata = {
     description:
       "Open-source design and prototyping. Measure, annotate, and ship drawings together.",
     type: "website",
+    // Resolved against metadataBase → emits an absolute og:url tag.
+    // Next.js merges the share-card image from app/opengraph-image.png.
+    url: "/",
   },
   twitter: {
     card: "summary_large_image",
     title: "tracable",
     description:
       "Open-source design and prototyping. Measure, annotate, and ship drawings together.",
+  },
+  // og:logo isn't part of the standard Metadata API. Pipe it through
+  // `other` so Next emits the raw <meta property="og:logo" /> tag.
+  // We point it at the 180×180 apple-icon, the largest square brand
+  // glyph we serve.
+  other: {
+    "og:logo": "/apple-icon",
   },
 };
 
