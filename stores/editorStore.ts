@@ -37,7 +37,9 @@ export interface EditorState {
   // tools
   tool: Tool;
   draft: { tool: Tool; start: Pt; end: Pt } | null;
-  selection: { kind: "measurement" | "note" | "placed" | "shape"; id: string } | null;
+  selection:
+    | { kind: "measurement" | "note" | "placed" | "shape" | "drawing"; id: string }
+    | null;
   // Additional placed-item selections (multi-select). The primary item lives
   // in `selection`; these are siblings.
   multiSelection: Set<string>;
@@ -106,6 +108,10 @@ export interface EditorState {
   removeDrawing: (id: string) => void;
   toggleDrawing: (id: string) => void;
   renameDrawing: (id: string, name: string) => void;
+  setDrawingTransform: (
+    id: string,
+    patch: Partial<Pick<Drawing, "tx" | "ty" | "scale" | "rotation">>,
+  ) => void;
   upsertCursor: (c: RemoteCursor) => void;
   removeCursor: (userId: string) => void;
   toggleLayer: (k: keyof EditorState["layers"]) => void;
@@ -129,6 +135,68 @@ export interface Drawing {
   bounds: Bounds;
   visible: boolean;
   sortOrder: number;
+  // Per-drawing transform applied to its entities when composing the
+  // rendered union. (0, 0, 1, 0) is identity.
+  tx: number;
+  ty: number;
+  scale: number;
+  rotation: number; // degrees
+}
+
+function transformEntity(e: ParsedEntity, d: Drawing): ParsedEntity {
+  const { tx, ty, scale, rotation } = d;
+  if (tx === 0 && ty === 0 && scale === 1 && rotation === 0) return e;
+  const r = (rotation * Math.PI) / 180;
+  const cos = Math.cos(r);
+  const sin = Math.sin(r);
+  const xform = (x: number, y: number) => {
+    const sx = x * scale;
+    const sy = y * scale;
+    return { x: sx * cos - sy * sin + tx, y: sx * sin + sy * cos + ty };
+  };
+  switch (e.kind) {
+    case "line": {
+      const a = xform(e.ax, e.ay);
+      const b = xform(e.bx, e.by);
+      return { kind: "line", ax: a.x, ay: a.y, bx: b.x, by: b.y, color: e.color };
+    }
+    case "polyline": {
+      const pts: number[] = [];
+      for (let i = 0; i < e.points.length; i += 2) {
+        const p = xform(e.points[i], e.points[i + 1]);
+        pts.push(p.x, p.y);
+      }
+      return { kind: "polyline", points: pts, closed: e.closed, color: e.color };
+    }
+    case "circle": {
+      const c = xform(e.cx, e.cy);
+      return { kind: "circle", cx: c.x, cy: c.y, r: e.r * scale, color: e.color };
+    }
+    case "arc": {
+      const c = xform(e.cx, e.cy);
+      return {
+        kind: "arc",
+        cx: c.x,
+        cy: c.y,
+        r: e.r * scale,
+        start: e.start + r,
+        end: e.end + r,
+        color: e.color,
+      };
+    }
+    case "text": {
+      const p = xform(e.x, e.y);
+      return { kind: "text", x: p.x, y: p.y, size: e.size * scale, text: e.text, color: e.color };
+    }
+    case "image": {
+      // Translate the image's top-left, then expand bounds by scale. We
+      // can't do a true affine on a Pixi sprite via entities alone, but
+      // (translate + uniform scale) is what most users want for layer
+      // placement.
+      const p = xform(e.x, e.y);
+      return { kind: "image", x: p.x, y: p.y, w: e.w * scale, h: e.h * scale, src: e.src };
+    }
+  }
 }
 
 function recomputeEntities(drawings: Record<string, Drawing>): {
@@ -143,12 +211,43 @@ function recomputeEntities(drawings: Record<string, Drawing>): {
     maxY = -Infinity;
   for (const d of ordered) {
     if (!d.visible) continue;
-    entities.push(...d.entities);
-    if (d.bounds) {
-      if (d.bounds.minX < minX) minX = d.bounds.minX;
-      if (d.bounds.minY < minY) minY = d.bounds.minY;
-      if (d.bounds.maxX > maxX) maxX = d.bounds.maxX;
-      if (d.bounds.maxY > maxY) maxY = d.bounds.maxY;
+    const isIdentity =
+      d.tx === 0 && d.ty === 0 && d.scale === 1 && d.rotation === 0;
+    if (isIdentity) {
+      entities.push(...d.entities);
+      if (d.bounds) {
+        if (d.bounds.minX < minX) minX = d.bounds.minX;
+        if (d.bounds.minY < minY) minY = d.bounds.minY;
+        if (d.bounds.maxX > maxX) maxX = d.bounds.maxX;
+        if (d.bounds.maxY > maxY) maxY = d.bounds.maxY;
+      }
+    } else {
+      // Apply per-drawing transform to each entity. For very large
+      // drawings this is the moment we pay; subsequent renders just
+      // walk the cached, already-transformed array.
+      for (const e of d.entities) entities.push(transformEntity(e, d));
+      if (d.bounds) {
+        // Conservative bounds: transform the four corners and union.
+        const r = (d.rotation * Math.PI) / 180;
+        const cos = Math.cos(r);
+        const sin = Math.sin(r);
+        const corners = [
+          { x: d.bounds.minX, y: d.bounds.minY },
+          { x: d.bounds.maxX, y: d.bounds.minY },
+          { x: d.bounds.minX, y: d.bounds.maxY },
+          { x: d.bounds.maxX, y: d.bounds.maxY },
+        ];
+        for (const c of corners) {
+          const sx = c.x * d.scale;
+          const sy = c.y * d.scale;
+          const wx = sx * cos - sy * sin + d.tx;
+          const wy = sx * sin + sy * cos + d.ty;
+          if (wx < minX) minX = wx;
+          if (wy < minY) minY = wy;
+          if (wx > maxX) maxX = wx;
+          if (wy > maxY) maxY = wy;
+        }
+      }
     }
   }
   const bounds =
@@ -270,6 +369,15 @@ export const useEditor = create<EditorState>((set) => ({
       const cur = s.drawings[id];
       if (!cur) return {};
       return { drawings: { ...s.drawings, [id]: { ...cur, name } } };
+    }),
+  setDrawingTransform: (id, patch) =>
+    set((s) => {
+      const cur = s.drawings[id];
+      if (!cur) return {};
+      const next: Drawing = { ...cur, ...patch };
+      const drawings = { ...s.drawings, [id]: next };
+      const { entities, bounds } = recomputeEntities(drawings);
+      return { drawings, entities, bounds: bounds ?? s.bounds };
     }),
   upsertCursor: (c) =>
     set((s) => ({ cursors: { ...s.cursors, [c.userId]: c } })),

@@ -274,6 +274,10 @@ export function Editor({ initial }: { initial: InitialData }) {
       name: string;
       sortOrder: number;
       visible: boolean;
+      tx?: number;
+      ty?: number;
+      scale?: number;
+      rotation?: number;
     }) {
       // Best-effort: a missing/unknown type shouldn't break the whole
       // page. Try to recover by re-inferring from the filename, and if
@@ -317,6 +321,10 @@ export function Editor({ initial }: { initial: InitialData }) {
         bounds: parsed.bounds,
         visible: args.visible,
         sortOrder: args.sortOrder,
+        tx: args.tx ?? 0,
+        ty: args.ty ?? 0,
+        scale: args.scale ?? 1,
+        rotation: args.rotation ?? 0,
       });
       return parsed;
     }
@@ -355,6 +363,10 @@ export function Editor({ initial }: { initial: InitialData }) {
           name: d.file_name || "Layer",
           sortOrder: d.sort_order ?? 1,
           visible: d.visible,
+          tx: Number(d.x ?? 0),
+          ty: Number(d.y ?? 0),
+          scale: Number(d.scale ?? 1) || 1,
+          rotation: Number(d.rotation ?? 0),
         });
       }
     })().catch((err) => {
@@ -1027,6 +1039,22 @@ export function Editor({ initial }: { initial: InitialData }) {
     window.location.reload();
   }
 
+  async function updateDrawingTransform(
+    id: string,
+    patch: Partial<{ tx: number; ty: number; scale: number; rotation: number }>,
+  ) {
+    useEditor.getState().setDrawingTransform(id, patch);
+    if (id === "primary") return; // legacy primary has no DB row for transform
+    const dbPatch: any = {};
+    if (patch.tx !== undefined) dbPatch.x = patch.tx;
+    if (patch.ty !== undefined) dbPatch.y = patch.ty;
+    if (patch.scale !== undefined) dbPatch.scale = patch.scale;
+    if (patch.rotation !== undefined) dbPatch.rotation = patch.rotation;
+    if (Object.keys(dbPatch).length > 0) {
+      await supabase.from("page_drawings").update(dbPatch).eq("id", id);
+    }
+  }
+
   async function setDrawingVisible(id: string, visible: boolean) {
     useEditor.getState().toggleDrawing(id);
     if (id === "primary") return; // not persisted yet — UI-only for legacy primary
@@ -1304,6 +1332,7 @@ export function Editor({ initial }: { initial: InitialData }) {
         onUpdatePlacedItem={updatePlacedItem}
         onChangePlacedItemZ={changePlacedItemZ}
         onUpdateShape={updateShape}
+        onUpdateDrawing={updateDrawingTransform}
         onDeleteShape={deleteShape}
         onExportPng={exportPng}
         onDeleteSelection={() => {

@@ -26,6 +26,7 @@ export function Inspector({
   onChangePlacedItemZ,
   onUpdateShape,
   onDeleteShape,
+  onUpdateDrawing,
   onExportPng,
   scaleControls,
   mobileOpen,
@@ -40,6 +41,10 @@ export function Inspector({
   onChangePlacedItemZ: (id: string, mode: "front" | "back" | "forward" | "backward") => void;
   onUpdateShape: (id: string, patch: Partial<Shape>) => void;
   onDeleteShape: (id: string) => void;
+  onUpdateDrawing: (
+    id: string,
+    patch: Partial<{ tx: number; ty: number; scale: number; rotation: number }>,
+  ) => void;
   onExportPng: () => void;
   scaleControls: React.ReactNode;
   mobileOpen?: boolean;
@@ -70,6 +75,8 @@ export function Inspector({
     selection?.kind === "placed" ? placedItems[selection.id] : null;
   const shapes = useEditor((s) => s.shapes);
   const shapeSel = selection?.kind === "shape" ? shapes[selection.id] : null;
+  const drawings = useEditor((s) => s.drawings);
+  const drawingSel = selection?.kind === "drawing" ? drawings[selection.id] : null;
 
   const asideClass = mobileOpen
     ? "fixed right-0 top-0 z-40 flex h-full w-80 max-w-[85vw] flex-col overflow-y-auto border-l border-border bg-panel shadow-lg md:relative md:w-80 md:max-w-none md:shadow-none"
@@ -187,6 +194,56 @@ export function Inspector({
           <Download size={14} /> Export as PNG
         </button>
       </div>
+
+      {drawingSel ? (
+        <div className="border-b border-border p-4">
+          <div className="text-xs uppercase tracking-wider text-ink-faint">Layer</div>
+          <div className="mt-3 space-y-3">
+            <div>
+              <div className="truncate text-sm font-medium">{drawingSel.name}</div>
+              <div className="text-[11px] uppercase text-ink-faint">{drawingSel.fileType}</div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <NumField
+                label="X"
+                value={drawingSel.tx}
+                onCommit={(v) => onUpdateDrawing(drawingSel.id, { tx: v })}
+                disabled={!canEdit}
+              />
+              <NumField
+                label="Y"
+                value={drawingSel.ty}
+                onCommit={(v) => onUpdateDrawing(drawingSel.id, { ty: v })}
+                disabled={!canEdit}
+              />
+              <NumField
+                label="Scale"
+                value={drawingSel.scale}
+                step={0.05}
+                min={0.01}
+                onCommit={(v) => onUpdateDrawing(drawingSel.id, { scale: v })}
+                disabled={!canEdit}
+              />
+              <NumField
+                label="Rotation°"
+                value={drawingSel.rotation}
+                onCommit={(v) => onUpdateDrawing(drawingSel.id, { rotation: v })}
+                disabled={!canEdit}
+              />
+            </div>
+            {canEdit ? (
+              <button
+                onClick={() =>
+                  onUpdateDrawing(drawingSel.id, { tx: 0, ty: 0, scale: 1, rotation: 0 })
+                }
+                className="text-xs text-ink-muted underline underline-offset-4 hover:text-ink"
+              >
+                Reset transform
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {shapeSel ? (
         <div className="border-b border-border p-4">
@@ -876,6 +933,48 @@ function ShapeProperties({
           Delete shape
         </button>
       ) : null}
+    </div>
+  );
+}
+
+function NumField({
+  label,
+  value,
+  step = 1,
+  min,
+  onCommit,
+  disabled,
+}: {
+  label: string;
+  value: number;
+  step?: number;
+  min?: number;
+  onCommit: (v: number) => void;
+  disabled?: boolean;
+}) {
+  const [local, setLocal] = useState(String(value));
+  // Keep input in sync when external state changes (e.g. realtime, reset).
+  if (!Number.isNaN(parseFloat(local)) && Math.abs(parseFloat(local) - value) > 0.001) {
+    // do nothing — the user might be mid-typing
+  }
+  return (
+    <div className="rounded border border-border bg-panel-muted p-2">
+      <div className="text-[10px] uppercase tracking-wider text-ink-faint">{label}</div>
+      <input
+        type="number"
+        step={step}
+        min={min}
+        defaultValue={value}
+        disabled={disabled}
+        onBlur={(e) => {
+          const v = parseFloat(e.target.value);
+          if (Number.isFinite(v) && Math.abs(v - value) > 0.0001) onCommit(v);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+        }}
+        className="mt-0.5 w-full bg-transparent font-num text-sm outline-none"
+      />
     </div>
   );
 }

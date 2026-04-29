@@ -24,6 +24,8 @@ export function LayersPanel({
   onDelete: (id: string) => void;
 }) {
   const drawings = useEditor((s) => s.drawings);
+  const selection = useEditor((s) => s.selection);
+  const setSelection = useEditor((s) => s.setSelection);
   const [open, setOpen] = useState(true);
 
   const drawingList = Object.values(drawings).sort(
@@ -91,13 +93,22 @@ export function LayersPanel({
               </div>
             ) : (
               <ul className="space-y-1">
-                {drawingList.map((d) => (
+                {drawingList.map((d) => {
+                  const isSelected =
+                    selection?.kind === "drawing" && selection.id === d.id;
+                  return (
                   <li
                     key={d.id}
-                    className="group flex items-center gap-2 rounded px-2 py-2 text-sm hover:bg-panel-muted"
+                    onClick={() => setSelection({ kind: "drawing", id: d.id })}
+                    className={`group flex cursor-pointer items-center gap-2 rounded px-2 py-2 text-sm ${
+                      isSelected ? "bg-panel-muted ring-1 ring-ink/20" : "hover:bg-panel-muted"
+                    }`}
                   >
                     <button
-                      onClick={() => onSetVisible(d.id, !d.visible)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSetVisible(d.id, !d.visible);
+                      }}
                       title={d.visible ? "Hide" : "Show"}
                       className="text-ink-muted hover:text-ink"
                     >
@@ -117,7 +128,8 @@ export function LayersPanel({
                     </span>
                     {canEdit ? (
                       <button
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           if (confirm(`Delete layer "${d.name}"?`)) onDelete(d.id);
                         }}
                         className="opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100"
@@ -127,7 +139,8 @@ export function LayersPanel({
                       </button>
                     ) : null}
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </section>
