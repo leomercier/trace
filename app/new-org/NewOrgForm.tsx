@@ -42,7 +42,7 @@ export function NewOrgForm() {
           autoFocus
         />
       </div>
-      {error ? <p className="text-sm text-measure">{error}</p> : null}
+      {error ? <p className="text-sm text-trace-error">{error}</p> : null}
       <Button type="submit" loading={loading} className="w-full">
         Create workspace
       </Button>

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { TraceLogo } from "@/components/marketing/TraceLogo";
 
 export function PostLoginClient({ next }: { next: string }) {
   const router = useRouter();
@@ -34,8 +35,11 @@ export function PostLoginClient({ next }: { next: string }) {
   }, [router, next]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-bg">
-      <div className="text-ink-muted">Setting things up…</div>
+    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-trace-white text-trace-black">
+      <TraceLogo size={36} />
+      <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-trace-black/50">
+        Setting things up…
+      </div>
     </div>
   );
 }

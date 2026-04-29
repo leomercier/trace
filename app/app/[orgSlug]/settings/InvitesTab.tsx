@@ -58,8 +58,11 @@ export function InvitesTab({
   }
 
   return (
-    <div className="mt-4">
-      <form onSubmit={onInvite} className="grid gap-3 rounded-md border border-border bg-panel p-4 md:grid-cols-[1fr_140px_auto]">
+    <div>
+      <form
+        onSubmit={onInvite}
+        className="grid gap-3 rounded-md border border-trace-black/15 bg-trace-white p-4 md:grid-cols-[1fr_140px_auto]"
+      >
         <div>
           <Label htmlFor="ie">Email</Label>
           <Input
@@ -77,7 +80,7 @@ export function InvitesTab({
             id="ir"
             value={role}
             onChange={(e) => setRole(e.target.value as OrgRole)}
-            className="h-10 w-full rounded-md border border-border bg-panel px-3 text-sm"
+            className="h-10 w-full rounded-md border border-trace-black/20 bg-trace-white px-3 text-sm text-trace-black hover:border-trace-black focus:border-trace-black focus:outline-none"
           >
             {ROLES.map((r) => (
               <option key={r} value={r}>
@@ -91,17 +94,20 @@ export function InvitesTab({
             Send invite
           </Button>
         </div>
-        {error ? <p className="md:col-span-3 text-sm text-measure">{error}</p> : null}
+        {error ? (
+          <p className="text-sm text-trace-error md:col-span-3">{error}</p>
+        ) : null}
       </form>
 
-      <p className="mt-3 text-xs text-ink-faint">
-        We&rsquo;ll email a link they can use to accept. You can also copy and share the
-        link directly.
+      <p className="mt-3 font-mono text-[11px] uppercase tracking-[0.18em] text-trace-black/50">
+        Email + copyable link · accept_url is single-use
       </p>
 
-      <ul className="mt-6 divide-y divide-border rounded-md border border-border bg-panel">
+      <ul className="mt-6 divide-y divide-trace-black/10 rounded-md border border-trace-black/15 bg-trace-white">
         {invites.length === 0 ? (
-          <li className="p-4 text-sm text-ink-muted">No pending invites.</li>
+          <li className="p-6 text-sm text-trace-black/60">
+            No pending invites.
+          </li>
         ) : null}
         {invites.map((i) => {
           const url =
@@ -110,25 +116,37 @@ export function InvitesTab({
               ? `${window.location.origin}/api/invite/${i.token}`
               : "");
           return (
-            <li key={i.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
+            <li
+              key={i.id}
+              className="flex flex-wrap items-center justify-between gap-3 p-4"
+            >
               <div className="min-w-0">
-                <div className="text-sm">{i.email}</div>
-                <div className="text-xs text-ink-faint">
-                  {i.role} · expires {new Date(i.expires_at).toLocaleDateString()}
+                <div className="text-sm font-medium text-trace-black">
+                  {i.email}
                 </div>
-                <div className="mt-1 truncate font-num text-[11px] text-ink-faint">{url}</div>
+                <div className="mt-0.5 flex items-center gap-2 text-xs text-trace-black/60">
+                  <span className="rounded-full border border-trace-black/15 bg-trace-black/5 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em]">
+                    {i.role}
+                  </span>
+                  <span>
+                    Expires {new Date(i.expires_at).toLocaleDateString()}
+                  </span>
+                </div>
+                <div className="mt-1 truncate font-mono text-[11px] text-trace-black/50">
+                  {url}
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => copy(url, i.id)}
-                  className="rounded border border-border bg-panel-muted p-2 hover:bg-panel"
+                  className="rounded-md border border-trace-black/15 bg-trace-white p-2 text-trace-black hover:border-trace-black"
                   title="Copy link"
                 >
                   {copied === i.id ? <Check size={14} /> : <Copy size={14} />}
                 </button>
                 <button
                   onClick={() => revoke(i.id)}
-                  className="rounded border border-border bg-panel-muted p-2 text-measure hover:bg-panel"
+                  className="rounded-md border border-trace-black/15 bg-trace-white p-2 text-trace-error hover:border-trace-error"
                   title="Revoke"
                 >
                   <Trash2 size={14} />

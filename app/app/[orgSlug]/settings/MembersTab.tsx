@@ -44,25 +44,42 @@ export function MembersTab({
   }
 
   return (
-    <ul className="mt-4 divide-y divide-border rounded-md border border-border bg-panel">
+    <ul className="divide-y divide-trace-black/10 rounded-md border border-trace-black/15 bg-trace-white">
       {members.map((m) => {
         const isSelf = m.user_id === currentUserId;
-        const canEdit = (currentRole === "owner" || currentRole === "admin") && !isSelf && m.role !== "owner";
+        const canEdit =
+          (currentRole === "owner" || currentRole === "admin") &&
+          !isSelf &&
+          m.role !== "owner";
         return (
-          <li key={m.user_id} className="flex items-center justify-between gap-4 p-4">
+          <li
+            key={m.user_id}
+            className="flex items-center justify-between gap-4 p-4"
+          >
             <div className="flex min-w-0 items-center gap-3">
               <Avatar name={m.display_name} src={m.avatar_url} size={36} />
               <div className="min-w-0">
-                <div className="truncate text-sm font-medium">{m.display_name}</div>
-                <div className="truncate text-xs text-ink-faint">{m.email}</div>
+                <div className="truncate text-sm font-medium text-trace-black">
+                  {m.display_name}
+                  {isSelf ? (
+                    <span className="ml-2 font-mono text-[10px] uppercase tracking-[0.18em] text-trace-black/50">
+                      You
+                    </span>
+                  ) : null}
+                </div>
+                <div className="truncate text-xs text-trace-black/60">
+                  {m.email}
+                </div>
               </div>
             </div>
             <div className="flex items-center gap-3">
               {canEdit ? (
                 <select
                   value={m.role}
-                  onChange={(e) => changeRole(m.user_id, e.target.value as OrgRole)}
-                  className="h-9 rounded-md border border-border bg-panel px-2 text-sm"
+                  onChange={(e) =>
+                    changeRole(m.user_id, e.target.value as OrgRole)
+                  }
+                  className="h-9 rounded-md border border-trace-black/20 bg-trace-white px-2 text-sm text-trace-black hover:border-trace-black focus:border-trace-black focus:outline-none"
                 >
                   {ROLES.filter((r) => r !== "owner").map((r) => (
                     <option key={r} value={r}>
@@ -71,12 +88,20 @@ export function MembersTab({
                   ))}
                 </select>
               ) : (
-                <span className="text-xs uppercase tracking-wider text-ink-muted">{m.role}</span>
+                <span
+                  className={`rounded-full border px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em] ${
+                    m.role === "owner"
+                      ? "border-trace-violet/30 bg-trace-violet/10 text-trace-violet"
+                      : "border-trace-black/15 bg-trace-black/5 text-trace-black/70"
+                  }`}
+                >
+                  {m.role}
+                </span>
               )}
               {canEdit ? (
                 <button
                   onClick={() => remove(m.user_id)}
-                  className="text-xs text-measure underline underline-offset-4 hover:no-underline"
+                  className="font-mono text-[11px] uppercase tracking-[0.18em] text-trace-error hover:underline"
                 >
                   Remove
                 </button>

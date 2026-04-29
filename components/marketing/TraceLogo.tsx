@@ -2,69 +2,47 @@ import { cn } from "@/lib/utils/cn";
 
 export function TraceLogo({
   className,
-  showAnchors = false,
   size = 28,
 }: {
   className?: string;
-  showAnchors?: boolean;
   size?: number;
 }) {
   return (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 32 32"
+      viewBox="0 0 512 512"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={cn("inline-block", className)}
       aria-hidden="true"
     >
       <path
-        d="M11 4 V12 H6 V16 H11 V24 Q11 28 15 28 H22"
+        d="M164 124H348 M256 124V360 M256 360H336 M336 360V300 M336 300H286"
         stroke="currentColor"
-        strokeWidth="2.6"
-        strokeLinecap="square"
-        strokeLinejoin="miter"
-        fill="none"
+        strokeWidth="44"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
-      {showAnchors && (
-        <g>
-          <Anchor x={11} y={4} />
-          <Anchor x={11} y={12} />
-          <Anchor x={6} y={16} />
-          <Anchor x={11} y={16} />
-          <Anchor x={11} y={24} />
-          <Anchor x={22} y={28} />
-        </g>
-      )}
+      <circle cx="164" cy="124" r="16" fill="currentColor" />
+      <circle cx="256" cy="124" r="16" fill="currentColor" />
+      <circle cx="348" cy="124" r="16" fill="currentColor" />
+      <circle cx="256" cy="360" r="16" fill="currentColor" />
+      <circle cx="336" cy="300" r="16" fill="currentColor" />
     </svg>
-  );
-}
-
-function Anchor({ x, y }: { x: number; y: number }) {
-  return (
-    <rect
-      x={x - 1.6}
-      y={y - 1.6}
-      width="3.2"
-      height="3.2"
-      fill="white"
-      stroke="currentColor"
-      strokeWidth="1.2"
-    />
   );
 }
 
 export function TraceWordmark({
   className,
-  showAnchors = false,
+  logoSize = 22,
 }: {
   className?: string;
-  showAnchors?: boolean;
+  logoSize?: number;
 }) {
   return (
     <span className={cn("inline-flex items-center gap-2", className)}>
-      <TraceLogo size={22} showAnchors={showAnchors} />
+      <TraceLogo size={logoSize} />
       <span className="font-display text-[20px] font-semibold tracking-tight">
         trace
       </span>
