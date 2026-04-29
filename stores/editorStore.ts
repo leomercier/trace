@@ -147,13 +147,24 @@ export interface Drawing {
 function transformEntity(e: ParsedEntity, d: Drawing): ParsedEntity {
   const { tx, ty, scale, rotation } = d;
   if (tx === 0 && ty === 0 && scale === 1 && rotation === 0) return e;
+  // Pivot scale + rotation around the drawing's natural centre so the
+  // user's mental model holds: scale grows the layer about its centre,
+  // rotation spins it about its centre, and (tx, ty) is just the offset
+  // applied to that centre. With this convention, identity is
+  // (tx=0, ty=0, scale=1, rotation=0) regardless of where the drawing's
+  // raw entities sit in source coords.
+  const cx = (d.bounds.minX + d.bounds.maxX) / 2;
+  const cy = (d.bounds.minY + d.bounds.maxY) / 2;
   const r = (rotation * Math.PI) / 180;
   const cos = Math.cos(r);
   const sin = Math.sin(r);
   const xform = (x: number, y: number) => {
-    const sx = x * scale;
-    const sy = y * scale;
-    return { x: sx * cos - sy * sin + tx, y: sx * sin + sy * cos + ty };
+    const lx = (x - cx) * scale;
+    const ly = (y - cy) * scale;
+    return {
+      x: lx * cos - ly * sin + cx + tx,
+      y: lx * sin + ly * cos + cy + ty,
+    };
   };
   switch (e.kind) {
     case "line": {
@@ -228,7 +239,10 @@ function recomputeEntities(drawings: Record<string, Drawing>): {
       // walk the cached, already-transformed array.
       for (const e of d.entities) entities.push(transformEntity(e, d));
       if (d.bounds) {
-        // Conservative bounds: transform the four corners and union.
+        // Conservative bounds: transform the four corners with the same
+        // centre-pivoting convention as transformEntity().
+        const cx = (d.bounds.minX + d.bounds.maxX) / 2;
+        const cy = (d.bounds.minY + d.bounds.maxY) / 2;
         const r = (d.rotation * Math.PI) / 180;
         const cos = Math.cos(r);
         const sin = Math.sin(r);
@@ -239,10 +253,10 @@ function recomputeEntities(drawings: Record<string, Drawing>): {
           { x: d.bounds.maxX, y: d.bounds.maxY },
         ];
         for (const c of corners) {
-          const sx = c.x * d.scale;
-          const sy = c.y * d.scale;
-          const wx = sx * cos - sy * sin + d.tx;
-          const wy = sx * sin + sy * cos + d.ty;
+          const lx = (c.x - cx) * d.scale;
+          const ly = (c.y - cy) * d.scale;
+          const wx = lx * cos - ly * sin + cx + d.tx;
+          const wy = lx * sin + ly * cos + cy + d.ty;
           if (wx < minX) minX = wx;
           if (wy < minY) minY = wy;
           if (wx > maxX) maxX = wx;

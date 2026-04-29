@@ -46,11 +46,10 @@ export class DrawingSelectionLayer extends PIXI.Container {
     const w = localW * (drawing.scale || 1);
     const h = localH * (drawing.scale || 1);
 
-    // Translate so the drawing's untransformed centre sits at origin,
-    // then apply the drawing's transform. This matches how
-    // recomputeEntities() flattens drawing entities into world space.
-    const wx = cx * (drawing.scale || 1) + drawing.tx;
-    const wy = cy * (drawing.scale || 1) + drawing.ty;
+    // Centre-pivot model: the drawing's centre sits at (cx + tx, cy + ty)
+    // in world space, then scale + rotation apply about that point.
+    const wx = cx + drawing.tx;
+    const wy = cy + drawing.ty;
     this.gfx.position.set(wx, wy);
     this.gfx.rotation = ((drawing.rotation || 0) * Math.PI) / 180;
 
@@ -136,8 +135,8 @@ function pointInsideDrawing(d: Drawing, wx: number, wy: number): boolean {
 function worldToLocal(d: Drawing, wx: number, wy: number): { x: number; y: number } {
   const cx = (d.bounds.minX + d.bounds.maxX) / 2;
   const cy = (d.bounds.minY + d.bounds.maxY) / 2;
-  const ox = cx * (d.scale || 1) + d.tx;
-  const oy = cy * (d.scale || 1) + d.ty;
+  const ox = cx + d.tx;
+  const oy = cy + d.ty;
   const dx = wx - ox;
   const dy = wy - oy;
   const r = ((d.rotation || 0) * Math.PI) / 180;

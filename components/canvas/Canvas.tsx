@@ -171,6 +171,11 @@ export function Canvas({
       a.gridLayer.render(cell);
     };
 
+    // Auto-fit only the FIRST time drawings show up. After that the
+    // viewport stays where the user put it, so dragging/resizing/rotating
+    // a drawing isn't immediately undone by a re-fit.
+    let hasFitOnce = false;
+
     const unsub = useEditor.subscribe((state, prev) => {
       const a = apiRef.current;
       if (!a) return;
@@ -178,14 +183,18 @@ export function Canvas({
       if (state.entities !== prev.entities) {
         a.drawingLayer.render(state.entities);
         a.snap.build(state.entities);
-        if (state.bounds) {
+        const justLoaded =
+          !hasFitOnce && (prev.entities?.length ?? 0) === 0 && state.entities.length > 0;
+        if (justLoaded && state.bounds) {
           a.viewport.fitTo(state.bounds);
           pushView();
+          hasFitOnce = true;
         }
       }
-      if (state.bounds !== prev.bounds && state.bounds) {
+      if (state.bounds !== prev.bounds && state.bounds && !hasFitOnce) {
         a.viewport.fitTo(state.bounds);
         pushView();
+        if (state.entities.length > 0) hasFitOnce = true;
       }
       if (
         state.measurements !== prev.measurements ||
@@ -578,6 +587,13 @@ export function Canvas({
         const world = a!.viewport.screenToWorld(sx, sy);
         const drawing = useEditor.getState().drawings[drawingDrag.id];
         if (!drawing) return;
+        // Drawing centre in world space, using the *start* transform so
+        // the pivot doesn't drift mid-drag.
+        const cxNat = (drawing.bounds.minX + drawing.bounds.maxX) / 2;
+        const cyNat = (drawing.bounds.minY + drawing.bounds.maxY) / 2;
+        const cx = cxNat + drawingDrag.start.tx;
+        const cy = cyNat + drawingDrag.start.ty;
+
         if (drawingDrag.mode === "move") {
           const dx = world.x - drawingDrag.startWorld.x;
           const dy = world.y - drawingDrag.startWorld.y;
@@ -590,8 +606,6 @@ export function Canvas({
           // rotation, ignoring the live rotation so we don't fight the
           // user mid-drag.
           const r = (drawingDrag.start.rotation * Math.PI) / 180;
-          const cx = ((drawing.bounds.minX + drawing.bounds.maxX) / 2) * drawingDrag.start.scale + drawingDrag.start.tx;
-          const cy = ((drawing.bounds.minY + drawing.bounds.maxY) / 2) * drawingDrag.start.scale + drawingDrag.start.ty;
           const ddx = world.x - cx;
           const ddy = world.y - cy;
           const lx = ddx * Math.cos(-r) - ddy * Math.sin(-r);
@@ -601,8 +615,6 @@ export function Canvas({
             drawingTransform.resize(drawingDrag.start, drawing.bounds, lx, ly),
           );
         } else if (drawingDrag.mode === "rotate") {
-          const cx = ((drawing.bounds.minX + drawing.bounds.maxX) / 2) * drawingDrag.start.scale + drawingDrag.start.tx;
-          const cy = ((drawing.bounds.minY + drawing.bounds.maxY) / 2) * drawingDrag.start.scale + drawingDrag.start.ty;
           let patch = drawingTransform.rotate({ x: cx, y: cy }, world.x, world.y);
           if (e.shiftKey && patch.rotation !== undefined) {
             patch = { rotation: Math.round(patch.rotation / 15) * 15 };
