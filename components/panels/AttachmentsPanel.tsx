@@ -1,24 +1,34 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Paperclip, Upload, ExternalLink, Trash2 } from "lucide-react";
+import { Upload, ExternalLink, Trash2, X, Paperclip } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { Attachment } from "@/lib/supabase/types";
 
+/**
+ * Attachments dialog. Controlled by `open` from the parent (the Toolbar's
+ * overflow menu button). Reports the live count via `onCountChange` so the
+ * toolbar badge stays current.
+ */
 export function AttachmentsPanel({
   pageId,
   orgId,
   projectId,
   canEdit,
+  open,
+  onClose,
+  onCountChange,
 }: {
   pageId: string;
   orgId: string;
   projectId: string;
   canEdit: boolean;
+  open: boolean;
+  onClose: () => void;
+  onCountChange?: (n: number) => void;
 }) {
   const supabase = createClient();
   const [items, setItems] = useState<Attachment[]>([]);
-  const [open, setOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function refresh() {
@@ -27,7 +37,9 @@ export function AttachmentsPanel({
       .select("*")
       .eq("page_id", pageId)
       .order("uploaded_at", { ascending: false });
-    setItems((data || []) as Attachment[]);
+    const next = (data || []) as Attachment[];
+    setItems(next);
+    onCountChange?.(next.length);
   }
 
   useEffect(() => {
@@ -68,70 +80,92 @@ export function AttachmentsPanel({
     if (data?.signedUrl) window.open(data.signedUrl, "_blank");
   }
 
+  if (!open) return null;
+
   return (
-    <div className="pointer-events-auto fixed bottom-20 right-4 z-20 md:bottom-4">
-      {open ? (
-        <div className="mb-2 w-72 rounded-md border border-border bg-panel p-3 shadow-md">
-          <div className="mb-2 flex items-center justify-between">
-            <div className="text-xs uppercase tracking-wider text-ink-faint">
-              Attachments
-            </div>
+    <div
+      onClick={onClose}
+      className="pointer-events-auto fixed inset-0 z-30 flex items-end justify-center bg-black/30 backdrop-blur-sm md:items-center"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-md rounded-t-lg border border-border bg-panel shadow-lg md:rounded-lg"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Paperclip size={14} />
+            <h2 className="font-serif text-base">Attachments</h2>
+            <span className="font-num text-xs text-ink-faint">{items.length}</span>
+          </div>
+          <div className="flex items-center gap-2">
             {canEdit ? (
               <button
                 onClick={() => fileRef.current?.click()}
-                className="rounded border border-border bg-panel-muted p-1.5 text-xs hover:bg-panel"
+                className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-panel-muted px-3 text-xs hover:bg-panel"
                 title="Upload"
               >
-                <Upload size={12} />
+                <Upload size={12} /> Upload
               </button>
             ) : null}
+            <button
+              onClick={onClose}
+              className="rounded p-1 text-ink-muted hover:bg-panel-muted hover:text-ink"
+              aria-label="Close"
+            >
+              <X size={16} />
+            </button>
           </div>
+        </div>
+        <div className="max-h-[60vh] overflow-y-auto p-3">
           {items.length === 0 ? (
-            <div className="text-sm text-ink-muted">No attachments yet.</div>
+            <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-ink-muted">
+              No attachments yet.
+              {canEdit ? (
+                <p className="mt-1 text-[11px]">
+                  Upload spec sheets, photos, or any reference file.
+                </p>
+              ) : null}
+            </div>
           ) : (
             <ul className="space-y-1">
               {items.map((a) => (
                 <li
                   key={a.id}
-                  className="flex items-center justify-between gap-2 rounded px-2 py-1.5 hover:bg-panel-muted"
+                  className="flex items-center justify-between gap-2 rounded px-2 py-2 hover:bg-panel-muted"
                 >
                   <button
                     onClick={() => openAttachment(a)}
-                    className="flex min-w-0 flex-1 items-center gap-1 text-left text-sm"
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm"
                   >
-                    <ExternalLink size={12} className="shrink-0 text-ink-faint" />
+                    <ExternalLink size={13} className="shrink-0 text-ink-faint" />
                     <span className="truncate">{a.file_name}</span>
                   </button>
                   {canEdit ? (
                     <button
                       onClick={() => onDelete(a)}
-                      className="text-ink-faint hover:text-measure"
+                      className="rounded p-1 text-ink-faint hover:bg-panel hover:text-measure"
+                      aria-label="Delete"
                     >
-                      <Trash2 size={12} />
+                      <Trash2 size={13} />
                     </button>
                   ) : null}
                 </li>
               ))}
             </ul>
           )}
-          <input
-            ref={fileRef}
-            type="file"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) onUpload(f);
-              e.currentTarget.value = "";
-            }}
-          />
         </div>
-      ) : null}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex h-10 items-center gap-1.5 rounded-md border border-border bg-panel px-3 text-sm shadow-sm hover:border-border-strong"
-      >
-        <Paperclip size={14} /> {items.length}
-      </button>
+        <input
+          ref={fileRef}
+          type="file"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onUpload(f);
+            e.currentTarget.value = "";
+          }}
+        />
+      </div>
     </div>
   );
 }

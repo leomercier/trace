@@ -61,6 +61,8 @@ export function Editor({ initial }: { initial: InitialData }) {
   const [shareOpen, setShareOpen] = useState(false);
   const [mobileLayersOpen, setMobileLayersOpen] = useState(false);
   const [mobileInspectorOpen, setMobileInspectorOpen] = useState(false);
+  const [attachmentsOpen, setAttachmentsOpen] = useState(false);
+  const [attachmentCount, setAttachmentCount] = useState(0);
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [dwgConverting, setDwgConverting] = useState(false);
@@ -768,7 +770,12 @@ export function Editor({ initial }: { initial: InitialData }) {
           onUpdate={updateNote}
           onDelete={deleteNote}
         />
-        <Toolbar />
+        <Toolbar
+          attachmentCount={attachmentCount}
+          onOpenAttachments={() => setAttachmentsOpen(true)}
+          onFit={() => canvasApi.current?.fitToContent()}
+          onExportPng={exportPng}
+        />
 
         {initial.role !== "viewer" && !dwgConverting ? (
           <FileDropOverlay
@@ -792,6 +799,9 @@ export function Editor({ initial }: { initial: InitialData }) {
           orgId={initial.orgId}
           projectId={initial.projectId}
           canEdit={initial.role !== "viewer"}
+          open={attachmentsOpen}
+          onClose={() => setAttachmentsOpen(false)}
+          onCountChange={setAttachmentCount}
         />
 
         <CalibrateDialog

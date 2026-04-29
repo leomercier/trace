@@ -1,10 +1,27 @@
 "use client";
 
-import { MousePointer2, Hand, Ruler, StickyNote, Crosshair } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  MousePointer2,
+  Hand,
+  Ruler,
+  StickyNote,
+  Crosshair,
+  ChevronRight,
+  Paperclip,
+  Download,
+  Maximize2,
+} from "lucide-react";
 import { useEditor, type Tool } from "@/stores/editorStore";
 import { cn } from "@/lib/utils/cn";
 
-const TOOLS: { id: Tool; label: string; icon: typeof Hand; key: string; viewerOk?: boolean }[] = [
+const TOOLS: {
+  id: Tool;
+  label: string;
+  icon: typeof Hand;
+  key: string;
+  viewerOk?: boolean;
+}[] = [
   { id: "select", label: "Select", icon: MousePointer2, key: "V", viewerOk: true },
   { id: "pan", label: "Pan", icon: Hand, key: "H", viewerOk: true },
   { id: "measure", label: "Measure", icon: Ruler, key: "M" },
@@ -12,24 +29,51 @@ const TOOLS: { id: Tool; label: string; icon: typeof Hand; key: string; viewerOk
   { id: "calibrate", label: "Calibrate", icon: Crosshair, key: "C" },
 ];
 
-export function Toolbar() {
+export function Toolbar({
+  attachmentCount = 0,
+  onOpenAttachments,
+  onFit,
+  onExportPng,
+}: {
+  attachmentCount?: number;
+  onOpenAttachments?: () => void;
+  onFit?: () => void;
+  onExportPng?: () => void;
+}) {
   const tool = useEditor((s) => s.tool);
   const setTool = useEditor((s) => s.setTool);
   const canEdit = useEditor((s) => s.canEdit);
 
   const items = TOOLS.filter((t) => canEdit || t.viewerOk);
 
+  const [moreOpen, setMoreOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onClick = (e: Event) => {
+      if (!wrapRef.current?.contains(e.target as any)) setMoreOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("touchstart", onClick);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("touchstart", onClick);
+    };
+  }, [moreOpen]);
+
   return (
     <div
+      ref={wrapRef}
       className={cn(
         "pointer-events-auto fixed left-1/2 z-20 -translate-x-1/2 rounded-md border border-border bg-panel p-1 shadow-md",
-        // Bottom-centre on every breakpoint. Sits above the mobile bottom
-        // sheet on small screens; floats above the canvas on desktop.
-        "bottom-20 md:bottom-6",
+        // Sit just above the safe-area on mobile, slightly higher on
+        // desktop where there's no bottom chrome.
+        "bottom-3 md:bottom-6",
       )}
       style={{ marginBottom: "env(safe-area-inset-bottom)" }}
     >
-      <div className="flex gap-1">
+      <div className="flex items-center gap-1">
         {items.map((t) => (
           <button
             key={t.id}
@@ -44,6 +88,87 @@ export function Toolbar() {
             <t.icon size={16} className="hidden md:block" />
           </button>
         ))}
+
+        {/* Overflow menu — attachments, fit, export, etc. */}
+        <div className="relative">
+          <button
+            onClick={() => setMoreOpen((v) => !v)}
+            title="More"
+            className={cn(
+              "flex h-11 w-11 items-center justify-center rounded text-ink-muted hover:bg-panel-muted hover:text-ink md:h-10 md:w-10",
+              moreOpen && "bg-panel-muted text-ink",
+            )}
+          >
+            <ChevronRight
+              size={18}
+              className={cn(
+                "transition-transform md:hidden",
+                moreOpen && "rotate-180",
+              )}
+            />
+            <ChevronRight
+              size={16}
+              className={cn(
+                "hidden transition-transform md:block",
+                moreOpen && "rotate-180",
+              )}
+            />
+            {attachmentCount > 0 ? (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-measure px-1 font-num text-[10px] text-white">
+                {attachmentCount}
+              </span>
+            ) : null}
+          </button>
+
+          {moreOpen ? (
+            <div
+              className="absolute bottom-full left-1/2 mb-2 flex -translate-x-1/2 items-center gap-1 rounded-md border border-border bg-panel p-1 shadow-md"
+              style={{ minWidth: 160 }}
+            >
+              {onOpenAttachments ? (
+                <button
+                  onClick={() => {
+                    onOpenAttachments();
+                    setMoreOpen(false);
+                  }}
+                  className="flex h-10 flex-col items-center justify-center gap-0.5 rounded px-2 text-[10px] text-ink-muted hover:bg-panel-muted hover:text-ink"
+                  title="Attachments"
+                >
+                  <Paperclip size={16} />
+                  <span>
+                    Files{attachmentCount > 0 ? ` · ${attachmentCount}` : ""}
+                  </span>
+                </button>
+              ) : null}
+              {onFit ? (
+                <button
+                  onClick={() => {
+                    onFit();
+                    setMoreOpen(false);
+                  }}
+                  className="flex h-10 flex-col items-center justify-center gap-0.5 rounded px-2 text-[10px] text-ink-muted hover:bg-panel-muted hover:text-ink"
+                  title="Fit to content"
+                >
+                  <Maximize2 size={16} />
+                  <span>Fit</span>
+                </button>
+              ) : null}
+              {onExportPng ? (
+                <button
+                  onClick={() => {
+                    onExportPng();
+                    setMoreOpen(false);
+                  }}
+                  className="flex h-10 flex-col items-center justify-center gap-0.5 rounded px-2 text-[10px] text-ink-muted hover:bg-panel-muted hover:text-ink"
+                  title="Export PNG"
+                >
+                  <Download size={16} />
+                  <span>Export</span>
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );
