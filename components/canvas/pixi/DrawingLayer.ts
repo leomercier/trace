@@ -3,12 +3,14 @@ import type { ParsedEntity } from "@/stores/editorStore";
 
 /**
  * Renders the source drawing (DXF/DWG entities, PDF texture, image) into the
- * world. For images we add a Sprite. For vector entities we use a single
- * Graphics instance — Pixi 8 batches strokes efficiently.
+ * world. For images we load via an HTMLImageElement → PIXI.Texture so we can
+ * track which load is current and ignore stale ones. For vector entities we
+ * use a single Graphics instance — Pixi 8 batches strokes efficiently.
  */
 export class DrawingLayer extends PIXI.Container {
   private gfx = new PIXI.Graphics();
   private sprites: PIXI.Sprite[] = [];
+  private renderToken = 0;
 
   constructor() {
     super();
@@ -24,6 +26,7 @@ export class DrawingLayer extends PIXI.Container {
   }
 
   render(entities: ParsedEntity[]) {
+    const myToken = ++this.renderToken;
     this.clear();
     const g = this.gfx;
     for (const e of entities) {
@@ -51,7 +54,6 @@ export class DrawingLayer extends PIXI.Container {
           break;
         }
         case "text": {
-          // Text rendered as a simple Text object to keep things light.
           const txt = new PIXI.Text({
             text: e.text,
             style: { fontFamily: "Inter", fontSize: e.size, fill: color, fontWeight: "400" },
@@ -61,14 +63,31 @@ export class DrawingLayer extends PIXI.Container {
           break;
         }
         case "image": {
-          PIXI.Assets.load(e.src).then((tex: PIXI.Texture) => {
-            const sp = new PIXI.Sprite(tex);
-            sp.position.set(e.x, e.y);
-            sp.width = e.w;
-            sp.height = e.h;
-            this.addChildAt(sp, 0);
-            this.sprites.push(sp);
-          });
+          // Load via HTMLImageElement so we can:
+          //  - get full control over caching (Pixi's Asset cache breaks on
+          //    blob: URLs that get revoked across page reloads),
+          //  - check the render token before adding the sprite, so a stale
+          //    load from a previous render doesn't pollute the layer.
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          img.onload = () => {
+            if (myToken !== this.renderToken) return;
+            try {
+              const tex = PIXI.Texture.from(img);
+              const sp = new PIXI.Sprite(tex);
+              sp.position.set(e.x, e.y);
+              sp.width = e.w;
+              sp.height = e.h;
+              this.addChildAt(sp, 0);
+              this.sprites.push(sp);
+            } catch (err) {
+              console.error("[trace] failed to add image sprite", err);
+            }
+          };
+          img.onerror = () => {
+            console.error("[trace] failed to load drawing image", e.src);
+          };
+          img.src = e.src;
           break;
         }
       }
@@ -76,3 +95,4 @@ export class DrawingLayer extends PIXI.Container {
     g.stroke({ color: 0x1c1917, width: 1, pixelLine: true });
   }
 }
+

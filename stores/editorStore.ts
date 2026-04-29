@@ -51,6 +51,11 @@ export interface EditorState {
   entities: ParsedEntity[];
   entitiesLoaded: boolean;
 
+  // Multi-file drawings (legacy primary + page_drawings rows). Keyed by
+  // the source id ("primary" for the legacy single-source, otherwise the
+  // page_drawings.id UUID).
+  drawings: Record<string, Drawing>;
+
   // actions
   init: (args: {
     pageId: string;
@@ -74,6 +79,10 @@ export interface EditorState {
   setScale: (realPerUnit: number, unit: Unit) => void;
   setBounds: (b: Bounds) => void;
   setEntities: (entities: ParsedEntity[]) => void;
+  upsertDrawing: (d: Drawing) => void;
+  removeDrawing: (id: string) => void;
+  toggleDrawing: (id: string) => void;
+  renameDrawing: (id: string, name: string) => void;
   upsertCursor: (c: RemoteCursor) => void;
   removeCursor: (userId: string) => void;
   toggleLayer: (k: keyof EditorState["layers"]) => void;
@@ -88,6 +97,41 @@ export type ParsedEntity =
   | { kind: "arc"; cx: number; cy: number; r: number; start: number; end: number; color?: number }
   | { kind: "text"; x: number; y: number; size: number; text: string; color?: number }
   | { kind: "image"; x: number; y: number; w: number; h: number; src: string };
+
+export interface Drawing {
+  id: string;            // "primary" for legacy single-source, otherwise page_drawings.id
+  name: string;
+  fileType: string;
+  entities: ParsedEntity[];
+  bounds: Bounds;
+  visible: boolean;
+  sortOrder: number;
+}
+
+function recomputeEntities(drawings: Record<string, Drawing>): {
+  entities: ParsedEntity[];
+  bounds: Bounds | null;
+} {
+  const ordered = Object.values(drawings).sort((a, b) => a.sortOrder - b.sortOrder);
+  const entities: ParsedEntity[] = [];
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+  for (const d of ordered) {
+    if (!d.visible) continue;
+    entities.push(...d.entities);
+    if (d.bounds) {
+      if (d.bounds.minX < minX) minX = d.bounds.minX;
+      if (d.bounds.minY < minY) minY = d.bounds.minY;
+      if (d.bounds.maxX > maxX) maxX = d.bounds.maxX;
+      if (d.bounds.maxY > maxY) maxY = d.bounds.maxY;
+    }
+  }
+  const bounds =
+    minX !== Infinity ? { minX, minY, maxX, maxY } : null;
+  return { entities, bounds };
+}
 
 export const useEditor = create<EditorState>((set) => ({
   pageId: null,
@@ -107,6 +151,7 @@ export const useEditor = create<EditorState>((set) => ({
   grid: { visible: true, sizeMM: 1000 },
   entities: [],
   entitiesLoaded: false,
+  drawings: {},
 
   init: ({ pageId, role, measurements, notes, placedItems, scale, bounds }) =>
     set(() => ({
@@ -119,6 +164,9 @@ export const useEditor = create<EditorState>((set) => ({
       scale,
       bounds,
       tool: role !== "viewer" ? "select" : "pan",
+      drawings: {},
+      entities: [],
+      entitiesLoaded: false,
     })),
 
   setTool: (t) => set({ tool: t, draft: null }),
@@ -150,6 +198,37 @@ export const useEditor = create<EditorState>((set) => ({
   setScale: (realPerUnit, unit) => set({ scale: { realPerUnit, unit } }),
   setBounds: (b) => set({ bounds: b }),
   setEntities: (entities) => set({ entities, entitiesLoaded: true }),
+  upsertDrawing: (d) =>
+    set((s) => {
+      const drawings = { ...s.drawings, [d.id]: d };
+      const { entities, bounds } = recomputeEntities(drawings);
+      return {
+        drawings,
+        entities,
+        entitiesLoaded: true,
+        bounds: bounds ?? s.bounds,
+      };
+    }),
+  removeDrawing: (id) =>
+    set((s) => {
+      const { [id]: _, ...drawings } = s.drawings;
+      const { entities, bounds } = recomputeEntities(drawings);
+      return { drawings, entities, bounds };
+    }),
+  toggleDrawing: (id) =>
+    set((s) => {
+      const cur = s.drawings[id];
+      if (!cur) return {};
+      const drawings = { ...s.drawings, [id]: { ...cur, visible: !cur.visible } };
+      const { entities, bounds } = recomputeEntities(drawings);
+      return { drawings, entities, bounds: bounds ?? s.bounds };
+    }),
+  renameDrawing: (id, name) =>
+    set((s) => {
+      const cur = s.drawings[id];
+      if (!cur) return {};
+      return { drawings: { ...s.drawings, [id]: { ...cur, name } } };
+    }),
   upsertCursor: (c) =>
     set((s) => ({ cursors: { ...s.cursors, [c.userId]: c } })),
   removeCursor: (userId) =>

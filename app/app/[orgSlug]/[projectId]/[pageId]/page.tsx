@@ -41,6 +41,7 @@ export default async function EditorPage({
     { data: notes },
     { data: placedItems },
     { data: pages },
+    { data: pageDrawings },
   ] = await Promise.all([
     supabase.from("projects").select("name").eq("id", params.projectId).maybeSingle(),
     supabase.from("measurements").select("*").eq("page_id", page.id),
@@ -57,6 +58,11 @@ export default async function EditorPage({
       .eq("project_id", params.projectId)
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true }),
+    supabase
+      .from("page_drawings")
+      .select("*")
+      .eq("page_id", page.id)
+      .order("sort_order", { ascending: true }),
   ]);
 
   let signedUrl: string | null = null;
@@ -93,6 +99,7 @@ export default async function EditorPage({
         projectName: project?.name || "",
         pages: (pages || []) as any,
         signedUrl,
+        pageDrawings: (pageDrawings || []) as any,
       }}
     />
   );

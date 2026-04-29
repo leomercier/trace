@@ -83,6 +83,15 @@ export interface Measurement {
   updated_at: string;
 }
 
+export interface NoteStyle {
+  bg?: string;
+  color?: string;
+  font?: string;
+  size?: number;
+  bold?: boolean;
+  italic?: boolean;
+}
+
 export interface Note {
   id: string;
   page_id: string;
@@ -92,9 +101,28 @@ export interface Note {
   h: number;
   text: string;
   color: string;
+  style: NoteStyle | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface PageDrawing {
+  id: string;
+  page_id: string;
+  storage_path: string;
+  file_type: FileType | null;
+  file_name: string | null;
+  file_size: number | null;
+  bounds: { minX: number; minY: number; maxX: number; maxY: number } | null;
+  x: number;
+  y: number;
+  rotation: number;
+  scale: number;
+  visible: boolean;
+  sort_order: number;
+  uploaded_by: string | null;
+  uploaded_at: string;
 }
 
 export interface Attachment {

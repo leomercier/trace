@@ -54,10 +54,14 @@ All variables and what they do:
    - `supabase/migrations/0001_init.sql` — schema
    - `supabase/migrations/0002_rls.sql` — Row Level Security
    - `supabase/migrations/0003_storage.sql` — storage buckets + policies
+   - `supabase/migrations/0004_inventory.sql` — inventory + AI usage tables
+   - `supabase/migrations/0005_notes_drawings.sql` — note styling + multi-file layers
 3. **Enable Realtime** for these tables (Database → Replication):
    - `measurements`
    - `notes`
    - `pages`
+   - `placed_items`
+   - `page_drawings`
 4. **Authentication providers:**
    - Email magic-link is enabled by default.
    - Google: Authentication → Providers → Google. Add the OAuth client ID/secret

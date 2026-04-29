@@ -7,7 +7,14 @@ import { Toolbar } from "@/components/panels/Toolbar";
 import { Inspector } from "@/components/panels/Inspector";
 import { CalibrateDialog } from "@/components/panels/CalibrateDialog";
 import { useEditor, type Tool } from "@/stores/editorStore";
-import type { InventoryItem, Measurement, Note, Page, PlacedItem } from "@/lib/supabase/types";
+import type {
+  InventoryItem,
+  Measurement,
+  Note,
+  Page,
+  PageDrawing,
+  PlacedItem,
+} from "@/lib/supabase/types";
 import { createClient } from "@/lib/supabase/client";
 import { parseFile, inferFileType } from "./parsers";
 import { Button } from "@/components/ui/Button";
@@ -16,6 +23,7 @@ import { ShareDialog } from "@/components/panels/ShareDialog";
 import { MobileSheet } from "@/components/panels/MobileSheet";
 import { AttachmentsPanel } from "@/components/panels/AttachmentsPanel";
 import { EditorMobileBar } from "@/components/panels/EditorMobileBar";
+import { LayersPanel } from "@/components/panels/LayersPanel";
 import { InventoryDrawer } from "@/components/inventory/InventoryDrawer";
 import { AssistantDrawer } from "@/components/assistant/AssistantDrawer";
 import { idbCacheGet, idbCacheSet, hashBlob } from "@/lib/utils/idb";
@@ -36,6 +44,7 @@ interface InitialData {
   projectName: string;
   pages: { id: string; name: string }[];
   signedUrl: string | null;
+  pageDrawings: PageDrawing[];
 }
 
 export function Editor({ initial }: { initial: InitialData }) {
@@ -85,33 +94,78 @@ export function Editor({ initial }: { initial: InitialData }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial.page.id]);
 
-  // load source file (parse + cache by hash)
+  // load all drawings (legacy primary + page_drawings rows)
   useEffect(() => {
-    if (!initial.signedUrl) return;
     let cancelled = false;
-    (async () => {
-      const res = await fetch(initial.signedUrl!);
+    async function loadOne(args: {
+      id: string;
+      signedUrl: string;
+      type: any;
+      name: string;
+      sortOrder: number;
+      visible: boolean;
+    }) {
+      const res = await fetch(args.signedUrl);
       const blob = await res.blob();
       const hash = await hashBlob(blob);
-      const cached = await idbCacheGet(hash);
-      const type = (initial.page.source_file_type || inferFileType(initial.page.source_file_name || "")) as any;
+      const cacheable = args.type === "dxf" || args.type === "dwg";
+      const cached = cacheable ? await idbCacheGet(hash) : null;
       let parsed = cached;
       if (!parsed) {
-        parsed = await parseFile(blob, type);
-        await idbCacheSet(hash, parsed);
+        parsed = await parseFile(blob, args.type);
+        if (cacheable) await idbCacheSet(hash, parsed);
       }
-      if (cancelled) return;
-      useEditor.getState().setEntities(parsed.entities);
-      useEditor.getState().setBounds(parsed.bounds);
-      // Persist bounds back if we just computed them
-      if (!initial.page.source_bounds) {
-        await supabase
-          .from("pages")
-          .update({ source_bounds: parsed.bounds })
-          .eq("id", initial.page.id);
+      if (cancelled) return null;
+      useEditor.getState().upsertDrawing({
+        id: args.id,
+        name: args.name,
+        fileType: args.type,
+        entities: parsed.entities,
+        bounds: parsed.bounds,
+        visible: args.visible,
+        sortOrder: args.sortOrder,
+      });
+      return parsed;
+    }
+
+    (async () => {
+      // 1) Legacy primary source on the page.
+      if (initial.signedUrl) {
+        const type = (initial.page.source_file_type ||
+          inferFileType(initial.page.source_file_name || "")) as any;
+        const parsed = await loadOne({
+          id: "primary",
+          signedUrl: initial.signedUrl,
+          type,
+          name: initial.page.source_file_name || "Drawing",
+          sortOrder: 0,
+          visible: true,
+        });
+        if (parsed && !initial.page.source_bounds) {
+          await supabase
+            .from("pages")
+            .update({ source_bounds: parsed.bounds })
+            .eq("id", initial.page.id);
+        }
+      }
+
+      // 2) Additional drawings (page_drawings table).
+      for (const d of initial.pageDrawings || []) {
+        const { data: signed } = await supabase.storage
+          .from("drawings")
+          .createSignedUrl(d.storage_path, 60 * 60);
+        if (!signed?.signedUrl) continue;
+        await loadOne({
+          id: d.id,
+          signedUrl: signed.signedUrl,
+          type: (d.file_type || inferFileType(d.file_name || "")) as any,
+          name: d.file_name || "Layer",
+          sortOrder: d.sort_order ?? 1,
+          visible: d.visible,
+        });
       }
     })().catch((err) => {
-      console.error("Failed to load drawing:", err);
+      console.error("Failed to load drawings:", err);
     });
     return () => {
       cancelled = true;
@@ -315,10 +369,11 @@ export function Editor({ initial }: { initial: InitialData }) {
       page_id: initial.page.id,
       x: p.x as any,
       y: p.y as any,
-      w: 200 as any,
-      h: 100 as any,
+      w: 240 as any,
+      h: 140 as any,
       text: "",
       color: "#fef3c7",
+      style: { bg: "#fef3c7", color: "#1c1917", font: "Caveat", size: 18 },
       created_by: initial.user.id,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -326,7 +381,14 @@ export function Editor({ initial }: { initial: InitialData }) {
     useEditor.getState().upsertNote(optimistic);
     const { data, error } = await supabase
       .from("notes")
-      .insert({ page_id: initial.page.id, x: p.x, y: p.y })
+      .insert({
+        page_id: initial.page.id,
+        x: p.x,
+        y: p.y,
+        w: optimistic.w,
+        h: optimistic.h,
+        style: optimistic.style,
+      })
       .select("*")
       .single();
     useEditor.getState().removeNote(optimisticId);
@@ -342,7 +404,15 @@ export function Editor({ initial }: { initial: InitialData }) {
     useEditor.getState().upsertNote(n);
     await supabase
       .from("notes")
-      .update({ x: n.x, y: n.y, w: n.w, h: n.h, text: n.text, color: n.color })
+      .update({
+        x: n.x,
+        y: n.y,
+        w: n.w,
+        h: n.h,
+        text: n.text,
+        color: n.color,
+        style: n.style,
+      })
       .eq("id", n.id);
   }
 
@@ -494,7 +564,15 @@ export function Editor({ initial }: { initial: InitialData }) {
       }
     }
 
-    const path = `${initial.orgId}/${initial.projectId}/${initial.page.id}/${fileName}`;
+    const layerId = crypto.randomUUID();
+    // If the page already has a primary, every new file becomes an
+    // additional layer (page_drawings row). If the page is empty, this
+    // becomes the primary so the existing single-source flow keeps
+    // working too.
+    const isPrimary = !initial.signedUrl && (initial.pageDrawings?.length ?? 0) === 0;
+    const path = `${initial.orgId}/${initial.projectId}/${initial.page.id}/${
+      isPrimary ? "" : `layers/${layerId}/`
+    }${fileName}`;
     const { error } = await supabase.storage.from("drawings").upload(path, blob, {
       upsert: true,
       cacheControl: "3600",
@@ -503,15 +581,70 @@ export function Editor({ initial }: { initial: InitialData }) {
       alert("Upload failed: " + error.message);
       return;
     }
+    if (isPrimary) {
+      await supabase
+        .from("pages")
+        .update({
+          source_storage_path: path,
+          source_file_type: detected,
+          source_file_name: fileName,
+          source_file_size: blob.size,
+        })
+        .eq("id", initial.page.id);
+    } else {
+      const existingMax =
+        Math.max(
+          0,
+          ...Object.values(useEditor.getState().drawings).map((d) => d.sortOrder),
+        ) + 1;
+      await supabase.from("page_drawings").insert({
+        id: layerId,
+        page_id: initial.page.id,
+        storage_path: path,
+        file_type: detected,
+        file_name: fileName,
+        file_size: blob.size,
+        sort_order: existingMax,
+      });
+    }
+    window.location.reload();
+  }
+
+  async function setDrawingVisible(id: string, visible: boolean) {
+    useEditor.getState().toggleDrawing(id);
+    if (id === "primary") return; // not persisted yet — UI-only for legacy primary
     await supabase
-      .from("pages")
-      .update({
-        source_storage_path: path,
-        source_file_type: detected,
-        source_file_name: fileName,
-        source_file_size: blob.size,
-      })
-      .eq("id", initial.page.id);
+      .from("page_drawings")
+      .update({ visible })
+      .eq("id", id);
+  }
+
+  async function deleteDrawing(id: string) {
+    if (id === "primary") {
+      // Clear the legacy primary.
+      const path = initial.page.source_storage_path;
+      useEditor.getState().removeDrawing("primary");
+      if (path) {
+        await supabase.storage.from("drawings").remove([path]);
+      }
+      await supabase
+        .from("pages")
+        .update({
+          source_storage_path: null,
+          source_file_type: null,
+          source_file_name: null,
+          source_file_size: null,
+        })
+        .eq("id", initial.page.id);
+    } else {
+      const drawing = useEditor.getState().drawings[id];
+      const meta = initial.pageDrawings.find((p) => p.id === id);
+      useEditor.getState().removeDrawing(id);
+      if (meta?.storage_path) {
+        await supabase.storage.from("drawings").remove([meta.storage_path]);
+      }
+      await supabase.from("page_drawings").delete().eq("id", id);
+    }
     window.location.reload();
   }
 
@@ -542,6 +675,12 @@ export function Editor({ initial }: { initial: InitialData }) {
         canEdit={initial.role !== "viewer"}
         canAdmin={initial.role === "owner" || initial.role === "admin"}
         onShare={() => setShareOpen(true)}
+      />
+      <LayersPanel
+        canEdit={initial.role !== "viewer"}
+        onUpload={onUploadFile}
+        onSetVisible={setDrawingVisible}
+        onDelete={deleteDrawing}
       />
       <div className="relative min-w-0 flex-1">
         <Canvas
