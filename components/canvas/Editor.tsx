@@ -275,21 +275,44 @@ export function Editor({ initial }: { initial: InitialData }) {
       sortOrder: number;
       visible: boolean;
     }) {
+      // Best-effort: a missing/unknown type shouldn't break the whole
+      // page. Try to recover by re-inferring from the filename, and if
+      // that's still "other", skip the layer with a console warning.
+      let type = args.type;
+      if (!type || type === "other") {
+        const inferred = inferFileType(args.name || "");
+        if (inferred !== "other") {
+          type = inferred;
+        } else {
+          console.warn(
+            `[trace] skipping drawing "${args.name}" — unsupported type "${args.type}"`,
+          );
+          return null;
+        }
+      }
       const res = await fetch(args.signedUrl);
       const blob = await res.blob();
       const hash = await hashBlob(blob);
-      const cacheable = args.type === "dxf" || args.type === "dwg";
+      const cacheable = type === "dxf" || type === "dwg";
       const cached = cacheable ? await idbCacheGet(hash) : null;
       let parsed = cached;
       if (!parsed) {
-        parsed = await parseFile(blob, args.type);
-        if (cacheable) await idbCacheSet(hash, parsed);
+        try {
+          parsed = await parseFile(blob, type);
+          if (cacheable) await idbCacheSet(hash, parsed);
+        } catch (err) {
+          console.error(
+            `[trace] failed to parse "${args.name}" (${type}):`,
+            err,
+          );
+          return null;
+        }
       }
       if (cancelled) return null;
       useEditor.getState().upsertDrawing({
         id: args.id,
         name: args.name,
-        fileType: args.type,
+        fileType: type,
         entities: parsed.entities,
         bounds: parsed.bounds,
         visible: args.visible,
@@ -918,6 +941,13 @@ export function Editor({ initial }: { initial: InitialData }) {
     let blob: Blob = file;
     let fileName = file.name;
     let detected = inferFileType(file.name);
+
+    if (detected === "other") {
+      alert(
+        `Couldn't add "${file.name}". Trace supports DWG, DXF, PDF, SVG, PNG, JPG, GIF, WEBP, BMP.`,
+      );
+      return;
+    }
 
     // Convert DWG → DXF in the browser at upload time. The DXF is what gets
     // persisted; the original DWG is never stored. From the page's
