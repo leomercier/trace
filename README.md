@@ -49,8 +49,23 @@ All variables and what they do:
 ### Supabase project setup
 
 1. Create a Supabase project.
-2. Run the migrations in order (Supabase Studio → SQL Editor, or via the
-   Supabase CLI):
+2. Run the migrations. Two options:
+
+   **Option A — automatic (recommended).** Set `SUPABASE_DB_URL` (the
+   direct Postgres connection string from Supabase → Project Settings →
+   Database → "Session pooler") in your Vercel project as a sensitive env
+   var. Vercel's build runs `bun run vercel-build` which calls
+   `bun run scripts/migrate.ts` *before* `next build`. The script:
+   - Creates a `_trace_migrations` tracking table on first run.
+   - Applies any `.sql` file in `supabase/migrations/` not yet recorded,
+     in filename order, each in its own transaction.
+   - Runs `supabase/seed.sql` at the end (idempotent — its first
+     statement clears the default rows).
+
+   You can also run it locally: `SUPABASE_DB_URL=... bun run migrate`.
+
+   **Option B — manual.** Open Supabase Studio → SQL Editor and paste
+   each file in order:
    - `supabase/migrations/0001_init.sql` — schema
    - `supabase/migrations/0002_rls.sql` — Row Level Security
    - `supabase/migrations/0003_storage.sql` — storage buckets + policies
@@ -59,6 +74,7 @@ All variables and what they do:
    - `supabase/migrations/0006_placed_lock.sql` — lock flag on placed items
    - `supabase/migrations/0007_shapes.sql` — line / rectangle / text shapes
    - `supabase/migrations/0008_measurement_label_offset.sql` — draggable measurement labels
+   - `supabase/seed.sql` — default furniture/fixtures inventory
 3. **Enable Realtime** for these tables (Database → Replication):
    - `measurements`
    - `notes`

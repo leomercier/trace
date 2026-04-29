@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "vercel-build": "bun run scripts/migrate.ts && next build",
+    "migrate": "bun run scripts/migrate.ts",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
@@ -20,6 +22,7 @@
     "next": "14.2.18",
     "pdfjs-dist": "^4.7.76",
     "pixi.js": "^8.5.2",
+    "postgres": "^3.4.9",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.53.2",
