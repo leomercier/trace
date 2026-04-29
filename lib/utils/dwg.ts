@@ -4,12 +4,20 @@
  * discarded after upload. This keeps the server free of GPL'd code and lets
  * the existing DXF parser do all the rendering.
  *
- * We load the package's pre-built UMD bundle from jsdelivr (CORS-friendly,
- * browser-targeted — esm.sh's transformed ESM tries to use module.require
- * via the "unenv" polyfill which is incomplete and crashes the WASM init).
+ * Loading is fiddly because:
+ *  - We can't bundle the package (24MB module graph stack-overflows webpack).
+ *  - esm.sh transforms the package into ESM but uses Node-env polyfills
+ *    ("unenv") that don't implement `module.require` — the WASM bootstrap
+ *    crashes on init.
+ *  - jsdelivr serves the package's UMD as `application/node` because of the
+ *    .cjs extension, and modern browsers refuse to execute scripts with
+ *    that MIME type.
+ *  - unpkg serves WASM without `Access-Control-Allow-Origin`.
  *
- * `LibreDwg.create(dir)` builds `${dir}/libredwg-web.wasm` internally, so we
- * pass the directory only — no trailing slash, no filename.
+ * The fix that actually works: fetch the UMD source as text, re-host it as
+ * a Blob with `application/javascript` MIME, then load THAT via a <script>
+ * tag. The WASM file is fetched separately by the package using the
+ * directory we hand it; jsdelivr does serve .wasm with proper CORS.
  */
 
 const VERSION = "0.7.0";
@@ -18,25 +26,30 @@ const WASM_DIR = `https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@${VERSION
 
 let _instance: any | null = null;
 let _loadingPromise: Promise<any> | null = null;
+let _scriptInjected = false;
 
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[data-src="${src}"]`);
-    if (existing && (existing as any).__trace_loaded__) {
-      resolve();
-      return;
-    }
+async function injectAsBlobScript(src: string): Promise<void> {
+  if (_scriptInjected) return;
+  const res = await fetch(src);
+  if (!res.ok) throw new Error(`Failed to fetch ${src}: ${res.status}`);
+  const code = await res.text();
+  const blob = new Blob([code], { type: "application/javascript" });
+  const blobUrl = URL.createObjectURL(blob);
+  await new Promise<void>((resolve, reject) => {
     const s = document.createElement("script");
-    s.src = src;
+    s.src = blobUrl;
     s.async = true;
-    s.dataset.src = src;
     s.onload = () => {
-      (s as any).__trace_loaded__ = true;
+      URL.revokeObjectURL(blobUrl);
       resolve();
     };
-    s.onerror = () => reject(new Error(`Failed to load ${src}`));
+    s.onerror = () => {
+      URL.revokeObjectURL(blobUrl);
+      reject(new Error(`Failed to execute ${src}`));
+    };
     document.head.appendChild(s);
   });
+  _scriptInjected = true;
 }
 
 async function getLibreDwg(): Promise<any> {
@@ -44,9 +57,8 @@ async function getLibreDwg(): Promise<any> {
   if (_loadingPromise) return _loadingPromise;
 
   _loadingPromise = (async () => {
-    await loadScript(UMD_URL);
+    await injectAsBlobScript(UMD_URL);
     // The UMD wrapper registers itself as `globalThis["libredwg-web"]`.
-    // Older builds used different keys; probe a few as fallback.
     const ns: any =
       (window as any)["libredwg-web"] ||
       (window as any).libredwg_web ||
