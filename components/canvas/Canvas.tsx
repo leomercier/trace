@@ -5,6 +5,7 @@ import * as PIXI from "pixi.js";
 import { useEditor } from "@/stores/editorStore";
 import { Viewport } from "./pixi/Viewport";
 import { DrawingLayer } from "./pixi/DrawingLayer";
+import { DrawingSelectionLayer, drawingTransform } from "./pixi/DrawingSelectionLayer";
 import { MeasurementLayer } from "./pixi/MeasurementLayer";
 import { CursorLayer } from "./pixi/CursorLayer";
 import { GridLayer } from "./pixi/GridLayer";
@@ -25,19 +26,26 @@ export function Canvas({
   onItemResize,
   onItemRotate,
   onItemMoveEnd,
+  onDrawingTransform,
+  onDrawingTransformEnd,
   onMeasurementLabelMove,
   onMeasurementLabelMoveEnd,
 }: {
   onPointerWorld?: (p: { x: number; y: number; snapped: boolean }) => void;
   onClickWorld?: (p: { x: number; y: number; snapped: boolean }) => void;
   onSelectionPick?: (
-    sel: { kind: "measurement" | "placed" | "shape"; id: string } | null,
+    sel: { kind: "measurement" | "placed" | "shape" | "drawing"; id: string } | null,
   ) => void;
   onCanvasReady?: (api: CanvasHandle) => void;
   onItemMove?: (id: string, x: number, y: number) => void;
   onItemResize?: (id: string, scaleW: number, scaleD: number) => void;
   onItemRotate?: (id: string, rotation: number) => void;
   onItemMoveEnd?: (id: string) => void;
+  onDrawingTransform?: (
+    id: string,
+    patch: Partial<{ tx: number; ty: number; scale: number; rotation: number }>,
+  ) => void;
+  onDrawingTransformEnd?: (id: string) => void;
   onMeasurementLabelMove?: (id: string, dx: number, dy: number) => void;
   onMeasurementLabelMoveEnd?: (id: string) => void;
 }) {
@@ -49,6 +57,7 @@ export function Canvas({
     viewport: Viewport;
     gridLayer: GridLayer;
     drawingLayer: DrawingLayer;
+    drawingSelLayer: DrawingSelectionLayer;
     measureLayer: MeasurementLayer;
     placedLayer: PlacedItemsLayer;
     shapesLayer: ShapesLayer;
@@ -86,12 +95,14 @@ export function Canvas({
       const gridLayer = new GridLayer(viewport);
       gridLayer.setSize(rect.width, rect.height);
       const drawingLayer = new DrawingLayer();
+      const drawingSelLayer = new DrawingSelectionLayer(viewport);
       const placedLayer = new PlacedItemsLayer(viewport);
       const shapesLayer = new ShapesLayer(viewport);
       const measureLayer = new MeasurementLayer(viewport);
       const cursorLayer = new CursorLayer(viewport);
       viewport.world.addChild(gridLayer);
       viewport.world.addChild(drawingLayer);
+      viewport.world.addChild(drawingSelLayer);
       viewport.world.addChild(placedLayer);
       viewport.world.addChild(shapesLayer);
       viewport.world.addChild(measureLayer);
@@ -106,6 +117,7 @@ export function Canvas({
         viewport,
         gridLayer,
         drawingLayer,
+        drawingSelLayer,
         placedLayer,
         shapesLayer,
         measureLayer,
@@ -203,6 +215,16 @@ export function Canvas({
           state.selection?.kind === "shape" ? state.selection.id : null,
         );
       }
+      if (
+        state.drawings !== prev.drawings ||
+        state.selection !== prev.selection
+      ) {
+        a.drawingSelLayer.render(
+          state.selection?.kind === "drawing"
+            ? state.drawings[state.selection.id] || null
+            : null,
+        );
+      }
       if (state.draft !== prev.draft) {
         a.measureLayer.drawDraft(state.draft?.start || null, state.draft?.end || null);
       }
@@ -224,6 +246,11 @@ export function Canvas({
         a.shapesLayer.render(
           Object.values(state.shapes),
           state.selection?.kind === "shape" ? state.selection.id : null,
+        );
+        a.drawingSelLayer.render(
+          state.selection?.kind === "drawing"
+            ? state.drawings[state.selection.id] || null
+            : null,
         );
         a.measureLayer.drawDraft(state.draft?.start || null, state.draft?.end || null);
         a.cursorLayer.render(Object.values(state.cursors));
@@ -315,6 +342,14 @@ export function Canvas({
           id: string;
           startWorld: { x: number; y: number };
           itemStart: { x: number; y: number; scale_w: number; scale_d: number; rotation: number; w_mm: number; d_mm: number };
+        }
+      | null = null;
+    let drawingDrag:
+      | {
+          mode: "move" | "resize" | "rotate";
+          id: string;
+          startWorld: { x: number; y: number };
+          start: { tx: number; ty: number; scale: number; rotation: number };
         }
       | null = null;
     let labelDrag:
@@ -458,6 +493,59 @@ export function Canvas({
           setDraggingClass(true);
           return;
         }
+
+        // Drawing layer manipulation. If a drawing is currently selected,
+        // its handles take priority over a fresh hit-test so the user can
+        // resize/rotate without the click being intercepted by another
+        // drawing it overlaps.
+        if (state.selection?.kind === "drawing") {
+          const sel = state.drawings[state.selection.id];
+          if (sel && !sel.locked) {
+            const handle = a!.drawingSelLayer.hitHandle(sel, world.x, world.y);
+            if (handle) {
+              drawingDrag = {
+                mode: handle,
+                id: sel.id,
+                startWorld: world,
+                start: {
+                  tx: sel.tx || 0,
+                  ty: sel.ty || 0,
+                  scale: sel.scale || 1,
+                  rotation: sel.rotation || 0,
+                },
+              };
+              canvas.setPointerCapture(e.pointerId);
+              setDraggingClass(true);
+              return;
+            }
+          }
+        }
+
+        // Plain click on a drawing layer.
+        const drawingHit = a!.drawingSelLayer.hitTest(
+          Object.values(state.drawings),
+          world.x,
+          world.y,
+        );
+        if (drawingHit) {
+          const drawing = state.drawings[drawingHit];
+          onSelectionPick?.({ kind: "drawing", id: drawingHit });
+          if (!drawing || drawing.locked) return;
+          drawingDrag = {
+            mode: "move",
+            id: drawingHit,
+            startWorld: world,
+            start: {
+              tx: drawing.tx || 0,
+              ty: drawing.ty || 0,
+              scale: drawing.scale || 1,
+              rotation: drawing.rotation || 0,
+            },
+          };
+          canvas.setPointerCapture(e.pointerId);
+          setDraggingClass(true);
+          return;
+        }
       }
 
       if (isPan || (tool === "select" && e.button === 0)) {
@@ -483,6 +571,44 @@ export function Canvas({
           labelDrag.startDx + dx,
           labelDrag.startDy + dy,
         );
+        return;
+      }
+
+      if (drawingDrag) {
+        const world = a!.viewport.screenToWorld(sx, sy);
+        const drawing = useEditor.getState().drawings[drawingDrag.id];
+        if (!drawing) return;
+        if (drawingDrag.mode === "move") {
+          const dx = world.x - drawingDrag.startWorld.x;
+          const dy = world.y - drawingDrag.startWorld.y;
+          onDrawingTransform?.(
+            drawingDrag.id,
+            drawingTransform.move(drawingDrag.start, dx, dy),
+          );
+        } else if (drawingDrag.mode === "resize") {
+          // Convert pointer into local space at the drawing's start
+          // rotation, ignoring the live rotation so we don't fight the
+          // user mid-drag.
+          const r = (drawingDrag.start.rotation * Math.PI) / 180;
+          const cx = ((drawing.bounds.minX + drawing.bounds.maxX) / 2) * drawingDrag.start.scale + drawingDrag.start.tx;
+          const cy = ((drawing.bounds.minY + drawing.bounds.maxY) / 2) * drawingDrag.start.scale + drawingDrag.start.ty;
+          const ddx = world.x - cx;
+          const ddy = world.y - cy;
+          const lx = ddx * Math.cos(-r) - ddy * Math.sin(-r);
+          const ly = ddx * Math.sin(-r) + ddy * Math.cos(-r);
+          onDrawingTransform?.(
+            drawingDrag.id,
+            drawingTransform.resize(drawingDrag.start, drawing.bounds, lx, ly),
+          );
+        } else if (drawingDrag.mode === "rotate") {
+          const cx = ((drawing.bounds.minX + drawing.bounds.maxX) / 2) * drawingDrag.start.scale + drawingDrag.start.tx;
+          const cy = ((drawing.bounds.minY + drawing.bounds.maxY) / 2) * drawingDrag.start.scale + drawingDrag.start.ty;
+          let patch = drawingTransform.rotate({ x: cx, y: cy }, world.x, world.y);
+          if (e.shiftKey && patch.rotation !== undefined) {
+            patch = { rotation: Math.round(patch.rotation / 15) * 15 };
+          }
+          onDrawingTransform?.(drawingDrag.id, patch);
+        }
         return;
       }
 
@@ -543,9 +669,11 @@ export function Canvas({
       const sy = e.clientY - rect.top;
       const wasDragging = dragging;
       const wasItemDrag = itemDrag;
+      const wasDrawingDrag = drawingDrag;
       const wasLabelDrag = labelDrag;
       dragging = false;
       itemDrag = null;
+      drawingDrag = null;
       labelDrag = null;
       setDraggingClass(false);
       try { canvas.releasePointerCapture(e.pointerId); } catch {}
@@ -556,6 +684,10 @@ export function Canvas({
       }
       if (wasItemDrag) {
         onItemMoveEnd?.(wasItemDrag.id);
+        return;
+      }
+      if (wasDrawingDrag) {
+        onDrawingTransformEnd?.(wasDrawingDrag.id);
         return;
       }
 
@@ -586,7 +718,18 @@ export function Canvas({
           return;
         }
         const mid = pickMeasurement(world);
-        onSelectionPick?.(mid ? { kind: "measurement", id: mid } : null);
+        if (mid) {
+          onSelectionPick?.({ kind: "measurement", id: mid });
+          return;
+        }
+        // Lowest priority: drawings sit beneath the other entities, so
+        // they only get selected when nothing else is hit.
+        const drawingHit = a!.drawingSelLayer.hitTest(
+          Object.values(state.drawings),
+          world.x,
+          world.y,
+        );
+        onSelectionPick?.(drawingHit ? { kind: "drawing", id: drawingHit } : null);
       } else {
         onClickWorld?.(snapped);
       }
@@ -595,6 +738,7 @@ export function Canvas({
     canvas.addEventListener("pointercancel", () => {
       dragging = false;
       itemDrag = null;
+      drawingDrag = null;
       labelDrag = null;
       setDraggingClass(false);
     });

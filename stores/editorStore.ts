@@ -110,7 +110,7 @@ export interface EditorState {
   renameDrawing: (id: string, name: string) => void;
   setDrawingTransform: (
     id: string,
-    patch: Partial<Pick<Drawing, "tx" | "ty" | "scale" | "rotation">>,
+    patch: Partial<Pick<Drawing, "tx" | "ty" | "scale" | "rotation" | "locked">>,
   ) => void;
   upsertCursor: (c: RemoteCursor) => void;
   removeCursor: (userId: string) => void;
@@ -134,6 +134,7 @@ export interface Drawing {
   entities: ParsedEntity[];
   bounds: Bounds;
   visible: boolean;
+  locked: boolean;
   sortOrder: number;
   // Per-drawing transform applied to its entities when composing the
   // rendered union. (0, 0, 1, 0) is identity.

@@ -289,6 +289,7 @@ export function Editor({ initial }: { initial: InitialData }) {
     name: string;
     sortOrder: number;
     visible: boolean;
+    locked?: boolean;
     tx?: number;
     ty?: number;
     scale?: number;
@@ -329,6 +330,7 @@ export function Editor({ initial }: { initial: InitialData }) {
       entities: parsed.entities,
       bounds: parsed.bounds,
       visible: args.visible,
+      locked: args.locked ?? false,
       sortOrder: args.sortOrder,
       tx: args.tx ?? 0,
       ty: args.ty ?? 0,
@@ -376,6 +378,7 @@ export function Editor({ initial }: { initial: InitialData }) {
           name: d.file_name || "Layer",
           sortOrder: d.sort_order ?? 1,
           visible: d.visible,
+          locked: Boolean((d as any).locked ?? false),
           tx: Number(d.x ?? 0),
           ty: Number(d.y ?? 0),
           scale: Number(d.scale ?? 1) || 1,
@@ -812,7 +815,7 @@ export function Editor({ initial }: { initial: InitialData }) {
   }
 
   function onSelectionPick(
-    sel: { kind: "measurement" | "placed" | "shape"; id: string } | null,
+    sel: { kind: "measurement" | "placed" | "shape" | "drawing"; id: string } | null,
   ) {
     useEditor.getState().setSelection(sel);
   }
@@ -1090,7 +1093,7 @@ export function Editor({ initial }: { initial: InitialData }) {
 
   async function updateDrawingTransform(
     id: string,
-    patch: Partial<{ tx: number; ty: number; scale: number; rotation: number }>,
+    patch: Partial<{ tx: number; ty: number; scale: number; rotation: number; locked: boolean }>,
   ) {
     useEditor.getState().setDrawingTransform(id, patch);
     if (id === "primary") return; // legacy primary has no DB row for transform
@@ -1099,9 +1102,28 @@ export function Editor({ initial }: { initial: InitialData }) {
     if (patch.ty !== undefined) dbPatch.y = patch.ty;
     if (patch.scale !== undefined) dbPatch.scale = patch.scale;
     if (patch.rotation !== undefined) dbPatch.rotation = patch.rotation;
+    if (patch.locked !== undefined) dbPatch.locked = patch.locked;
     if (Object.keys(dbPatch).length > 0) {
       await supabase.from("page_drawings").update(dbPatch).eq("id", id);
     }
+  }
+
+  // While dragging a drawing on the canvas we update the store optimistically
+  // every frame; the DB write only fires once at pointerup.
+  function onDrawingDrag(
+    id: string,
+    patch: Partial<{ tx: number; ty: number; scale: number; rotation: number }>,
+  ) {
+    useEditor.getState().setDrawingTransform(id, patch);
+  }
+  async function onDrawingDragEnd(id: string) {
+    if (id === "primary") return;
+    const d = useEditor.getState().drawings[id];
+    if (!d) return;
+    await supabase
+      .from("page_drawings")
+      .update({ x: d.tx, y: d.ty, scale: d.scale, rotation: d.rotation })
+      .eq("id", id);
   }
 
   async function setDrawingVisible(id: string, visible: boolean) {
@@ -1192,6 +1214,7 @@ export function Editor({ initial }: { initial: InitialData }) {
         onMobileClose={() => setMobileLayersOpen(false)}
         onUpload={onUploadFile}
         onSetVisible={setDrawingVisible}
+        onSetLocked={(id, locked) => updateDrawingTransform(id, { locked })}
         onDelete={deleteDrawing}
         onDeletePlacedItem={deletePlacedItem}
         onDeleteShape={deleteShape}
@@ -1218,6 +1241,8 @@ export function Editor({ initial }: { initial: InitialData }) {
           onItemResize={onItemResize}
           onItemRotate={onItemRotate}
           onItemMoveEnd={onItemMoveEnd}
+          onDrawingTransform={onDrawingDrag}
+          onDrawingTransformEnd={onDrawingDragEnd}
           onMeasurementLabelMove={(id, dx, dy) => {
             const m = useEditor.getState().measurements[id];
             if (!m) return;

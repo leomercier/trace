@@ -158,6 +158,7 @@ export interface PageDrawing {
   rotation: number;
   scale: number;
   visible: boolean;
+  locked: boolean;
   sort_order: number;
   uploaded_by: string | null;
   uploaded_at: string;

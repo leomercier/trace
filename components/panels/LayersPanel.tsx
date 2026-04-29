@@ -4,6 +4,8 @@ import { useState } from "react";
 import {
   Eye,
   EyeOff,
+  Lock,
+  Unlock,
   Plus,
   Trash2,
   FileText,
@@ -40,6 +42,7 @@ export function LayersPanel({
   onMobileClose,
   onUpload,
   onSetVisible,
+  onSetLocked,
   onDelete,
   onDeletePlacedItem,
   onDeleteShape,
@@ -51,6 +54,8 @@ export function LayersPanel({
   onMobileClose?: () => void;
   onUpload: (f: File) => void;
   onSetVisible: (id: string, visible: boolean) => void;
+  /** Persist lock state on a drawing layer. Pass undefined for "primary". */
+  onSetLocked: (id: string, locked: boolean) => void;
   onDelete: (id: string) => void;
   onDeletePlacedItem: (id: string) => void;
   onDeleteShape: (id: string) => void;
@@ -75,7 +80,6 @@ export function LayersPanel({
   const toggleLayer = useEditor((s) => s.toggleLayer);
   const selection = useEditor((s) => s.selection);
   const setSelection = useEditor((s) => s.setSelection);
-  const [open, setOpen] = useState(true);
 
   const drawingList = Object.values(drawings).sort(
     (a, b) => a.sortOrder - b.sortOrder,
@@ -129,18 +133,9 @@ export function LayersPanel({
         <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-ink-faint">
           <Layers size={13} /> Layers
         </div>
-        <button
-          onClick={() => setOpen((v) => !v)}
-          className="hidden text-xs text-ink-faint hover:text-ink md:inline"
-          title={open ? "Collapse" : "Expand"}
-          aria-label={open ? "Collapse" : "Expand"}
-        >
-          {open ? <Minus size={14} /> : <Plus size={14} />}
-        </button>
       </div>
 
-      {(open || mobileOpen) ? (
-        <div className="flex-1 space-y-4 overflow-y-auto p-3">
+      <div className="flex-1 space-y-4 overflow-y-auto p-3">
           {/* Drawings */}
           <Section
             title="Drawings"
@@ -186,6 +181,12 @@ export function LayersPanel({
                   selected={isSelected}
                   visible={d.visible}
                   onToggleVisible={() => onSetVisible(d.id, !d.visible)}
+                  locked={d.locked}
+                  onToggleLocked={
+                    canEdit && d.id !== "primary"
+                      ? () => onSetLocked(d.id, !d.locked)
+                      : undefined
+                  }
                   onSelect={() => setSelection({ kind: "drawing", id: d.id })}
                   onDelete={
                     canEdit
@@ -261,18 +262,13 @@ export function LayersPanel({
             ))}
           </Section>
         </div>
-      ) : null}
     </>
   );
 
   return (
     <>
       {/* Desktop dock */}
-      <aside
-        className={`hidden shrink-0 flex-col border-r border-border bg-panel md:flex ${
-          open ? "w-64" : "w-12"
-        }`}
-      >
+      <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-panel md:flex">
         {Body}
       </aside>
 
@@ -349,6 +345,8 @@ function Row({
   selected,
   visible,
   onToggleVisible,
+  locked,
+  onToggleLocked,
   onSelect,
   onDelete,
   icon,
@@ -358,6 +356,8 @@ function Row({
   selected: boolean;
   visible?: boolean;
   onToggleVisible?: () => void;
+  locked?: boolean;
+  onToggleLocked?: () => void;
   onSelect: () => void;
   onDelete?: () => void;
   icon: React.ReactNode;
@@ -396,6 +396,21 @@ function Row({
         <span className="font-num text-[10px] uppercase text-ink-faint">
           {badge}
         </span>
+      ) : null}
+      {onToggleLocked ? (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleLocked();
+          }}
+          title={locked ? "Unlock" : "Lock"}
+          aria-label={locked ? "Unlock" : "Lock"}
+          className={`text-ink-muted hover:text-ink ${
+            locked ? "opacity-100" : "opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100"
+          }`}
+        >
+          {locked ? <Lock size={12} /> : <Unlock size={12} />}
+        </button>
       ) : null}
       {onDelete ? (
         <button

@@ -44,7 +44,7 @@ export function Inspector({
   onDeleteShape: (id: string) => void;
   onUpdateDrawing: (
     id: string,
-    patch: Partial<{ tx: number; ty: number; scale: number; rotation: number }>,
+    patch: Partial<{ tx: number; ty: number; scale: number; rotation: number; locked: boolean }>,
   ) => void;
   onExportPng: () => void;
   scaleControls: React.ReactNode;
@@ -177,7 +177,27 @@ export function Inspector({
 
       {drawingSel ? (
         <div className="border-b border-border p-4">
-          <div className="text-xs uppercase tracking-wider text-ink-faint">Layer</div>
+          <div className="flex items-center justify-between">
+            <div className="text-xs uppercase tracking-wider text-ink-faint">
+              Layer
+            </div>
+            {canEdit && drawingSel.id !== "primary" ? (
+              <button
+                onClick={() =>
+                  onUpdateDrawing(drawingSel.id, { locked: !drawingSel.locked })
+                }
+                title={drawingSel.locked ? "Unlock" : "Lock"}
+                className={`flex h-7 items-center gap-1 rounded border px-2 text-xs ${
+                  drawingSel.locked
+                    ? "border-ink bg-ink text-white"
+                    : "border-border bg-panel-muted text-ink-muted hover:text-ink"
+                }`}
+              >
+                {drawingSel.locked ? <Lock size={11} /> : <Unlock size={11} />}
+                {drawingSel.locked ? "Locked" : "Lock"}
+              </button>
+            ) : null}
+          </div>
           <div className="mt-3 space-y-3">
             <div>
               <div className="truncate text-sm font-medium">{drawingSel.name}</div>
@@ -188,13 +208,13 @@ export function Inspector({
                 label="X"
                 value={drawingSel.tx}
                 onCommit={(v) => onUpdateDrawing(drawingSel.id, { tx: v })}
-                disabled={!canEdit}
+                disabled={!canEdit || drawingSel.locked}
               />
               <NumField
                 label="Y"
                 value={drawingSel.ty}
                 onCommit={(v) => onUpdateDrawing(drawingSel.id, { ty: v })}
-                disabled={!canEdit}
+                disabled={!canEdit || drawingSel.locked}
               />
               <NumField
                 label="Scale"
@@ -202,16 +222,16 @@ export function Inspector({
                 step={0.05}
                 min={0.01}
                 onCommit={(v) => onUpdateDrawing(drawingSel.id, { scale: v })}
-                disabled={!canEdit}
+                disabled={!canEdit || drawingSel.locked}
               />
               <NumField
                 label="Rotation°"
                 value={drawingSel.rotation}
                 onCommit={(v) => onUpdateDrawing(drawingSel.id, { rotation: v })}
-                disabled={!canEdit}
+                disabled={!canEdit || drawingSel.locked}
               />
             </div>
-            {canEdit ? (
+            {canEdit && !drawingSel.locked ? (
               <button
                 onClick={() =>
                   onUpdateDrawing(drawingSel.id, { tx: 0, ty: 0, scale: 1, rotation: 0 })
