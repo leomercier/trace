@@ -22,11 +22,10 @@ export function Toolbar() {
   return (
     <div
       className={cn(
-        "pointer-events-auto fixed z-20 rounded-md border border-border bg-panel p-1 shadow-md",
-        // Mobile: bottom-center, above the bottom sheet
-        "left-1/2 -translate-x-1/2 bottom-20",
-        // Desktop: top-left
-        "md:left-4 md:top-20 md:bottom-auto md:translate-x-0",
+        "pointer-events-auto fixed left-1/2 z-20 -translate-x-1/2 rounded-md border border-border bg-panel p-1 shadow-md",
+        // Bottom-centre on every breakpoint. Sits above the mobile bottom
+        // sheet on small screens; floats above the canvas on desktop.
+        "bottom-20 md:bottom-6",
       )}
       style={{ marginBottom: "env(safe-area-inset-bottom)" }}
     >
@@ -37,7 +36,7 @@ export function Toolbar() {
             title={`${t.label} (${t.key})`}
             onClick={() => setTool(t.id)}
             className={cn(
-              "flex h-11 w-11 items-center justify-center rounded text-ink-muted hover:bg-panel-muted hover:text-ink md:h-9 md:w-9",
+              "flex h-11 w-11 items-center justify-center rounded text-ink-muted hover:bg-panel-muted hover:text-ink md:h-10 md:w-10",
               tool === t.id && "bg-ink text-white hover:bg-ink hover:text-white",
             )}
           >

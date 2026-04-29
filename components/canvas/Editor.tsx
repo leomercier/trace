@@ -573,13 +573,6 @@ export function Editor({ initial }: { initial: InitialData }) {
             >
               <Maximize2 size={14} /> Fit
             </button>
-            <button
-              onClick={exportPng}
-              title="Export PNG"
-              className="flex h-9 items-center gap-1.5 rounded-md border border-border bg-panel px-3 text-sm hover:border-border-strong"
-            >
-              <Download size={14} /> PNG
-            </button>
           </div>
           <div className="pointer-events-auto flex items-center gap-2">
             {initial.role !== "viewer" ? (
@@ -616,8 +609,11 @@ export function Editor({ initial }: { initial: InitialData }) {
           </div>
         </div>
 
-        {!initial.signedUrl && initial.role !== "viewer" && !dwgConverting ? (
-          <FileDropzone onUpload={onUploadFile} />
+        {initial.role !== "viewer" && !dwgConverting ? (
+          <FileDropOverlay
+            empty={!initial.signedUrl}
+            onUpload={onUploadFile}
+          />
         ) : null}
 
         {dwgConverting ? (
@@ -690,6 +686,7 @@ export function Editor({ initial }: { initial: InitialData }) {
         onRenameMeasurement={renameMeasurement}
         onDeleteMeasurement={deleteMeasurement}
         onUpdatePlacedItem={updatePlacedItem}
+        onExportPng={exportPng}
         onDeleteSelection={() => {
           const sel = useEditor.getState().selection;
           if (sel?.kind === "measurement") deleteMeasurement(sel.id);
@@ -760,40 +757,73 @@ function UploadButton({ onUpload }: { onUpload: (f: File) => void }) {
   );
 }
 
-function FileDropzone({ onUpload }: { onUpload: (f: File) => void }) {
+/**
+ * Non-blocking drop target. Always listens for file drops on the whole canvas
+ * area, but renders no UI unless the user is actively dragging a file. When
+ * the page has no source drawing yet, shows a small "Add drawing" hint in
+ * the corner — but the canvas underneath is fully usable for measurements,
+ * notes, and placed items even with no drawing loaded.
+ */
+function FileDropOverlay({
+  empty,
+  onUpload,
+}: {
+  empty: boolean;
+  onUpload: (f: File) => void;
+}) {
   const [over, setOver] = useState(false);
   return (
-    <div
-      onDragOver={(e) => {
-        e.preventDefault();
-        setOver(true);
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setOver(false);
-        const f = e.dataTransfer.files?.[0];
-        if (f) onUpload(f);
-      }}
-      className={`pointer-events-auto absolute inset-0 m-12 flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-ink-muted transition-colors ${
-        over ? "border-ink bg-panel-muted" : "border-border bg-canvas/30"
-      }`}
-    >
-      <Upload size={28} className="text-ink-faint" />
-      <p className="font-serif text-2xl text-ink">Drop a drawing to start</p>
-      <p className="text-sm">DWG, DXF, PDF, SVG, PNG, JPG</p>
-      <label className="mt-3 cursor-pointer rounded-md border border-border bg-panel px-4 py-2 text-sm text-ink hover:border-border-strong">
-        Or browse files
-        <input
-          type="file"
-          className="hidden"
-          accept=".dwg,.dxf,.pdf,.svg,.png,.jpg,.jpeg"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) onUpload(f);
-          }}
-        />
-      </label>
-    </div>
+    <>
+      {/* Always-on file-drop catcher. pointer-events-none so it never blocks
+          measurement / note / item interactions; only enables when a drag
+          enters the window. */}
+      <div
+        onDragEnter={(e) => {
+          if (e.dataTransfer.types?.includes("Files")) setOver(true);
+        }}
+        onDragOver={(e) => {
+          if (e.dataTransfer.types?.includes("Files")) {
+            e.preventDefault();
+            setOver(true);
+          }
+        }}
+        onDragLeave={(e) => {
+          // only leave if we left the overlay container itself
+          if (e.currentTarget === e.target) setOver(false);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setOver(false);
+          const f = e.dataTransfer.files?.[0];
+          if (f) onUpload(f);
+        }}
+        className={`absolute inset-0 z-20 ${
+          over ? "pointer-events-auto" : "pointer-events-none"
+        }`}
+      >
+        {over ? (
+          <div className="m-8 flex h-[calc(100%-4rem)] flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-ink bg-panel-muted/90 text-ink backdrop-blur-sm">
+            <Upload size={28} />
+            <p className="font-serif text-2xl">Drop to upload</p>
+            <p className="text-sm text-ink-muted">DWG, DXF, PDF, SVG, PNG, JPG</p>
+          </div>
+        ) : null}
+      </div>
+
+      {empty ? (
+        <label className="pointer-events-auto absolute left-1/2 top-4 z-10 flex h-9 -translate-x-1/2 cursor-pointer items-center gap-1.5 rounded-md border border-dashed border-border bg-panel px-3 text-sm text-ink-muted hover:border-border-strong hover:text-ink">
+          <Upload size={14} /> Add a drawing
+          <input
+            type="file"
+            className="hidden"
+            accept=".dwg,.dxf,.pdf,.svg,.png,.jpg,.jpeg"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) onUpload(f);
+            }}
+          />
+        </label>
+      ) : null}
+    </>
   );
 }

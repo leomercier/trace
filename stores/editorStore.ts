@@ -44,6 +44,9 @@ export interface EditorState {
   // layers
   layers: { measurements: boolean; notes: boolean; cursors: boolean; items: boolean };
 
+  // grid
+  grid: { visible: boolean; sizeMM: number };
+
   // drawing entities (parsed from source file). Live in memory only.
   entities: ParsedEntity[];
   entitiesLoaded: boolean;
@@ -74,6 +77,8 @@ export interface EditorState {
   upsertCursor: (c: RemoteCursor) => void;
   removeCursor: (userId: string) => void;
   toggleLayer: (k: keyof EditorState["layers"]) => void;
+  toggleGrid: () => void;
+  setGridSize: (mm: number) => void;
 }
 
 export type ParsedEntity =
@@ -99,6 +104,7 @@ export const useEditor = create<EditorState>((set) => ({
   bounds: null,
   cursors: {},
   layers: { measurements: true, notes: true, cursors: true, items: true },
+  grid: { visible: true, sizeMM: 1000 },
   entities: [],
   entitiesLoaded: false,
 
@@ -112,7 +118,7 @@ export const useEditor = create<EditorState>((set) => ({
       placedItems: Object.fromEntries(placedItems.map((p) => [p.id, p])),
       scale,
       bounds,
-      tool: role !== "viewer" ? "measure" : "pan",
+      tool: role !== "viewer" ? "select" : "pan",
     })),
 
   setTool: (t) => set({ tool: t, draft: null }),
@@ -153,4 +159,10 @@ export const useEditor = create<EditorState>((set) => ({
     }),
   toggleLayer: (k) =>
     set((s) => ({ layers: { ...s.layers, [k]: !s.layers[k] } })),
+  toggleGrid: () =>
+    set((s) => ({ grid: { ...s.grid, visible: !s.grid.visible } })),
+  setGridSize: (mm) =>
+    set((s) => ({
+      grid: { ...s.grid, sizeMM: Math.max(1, Math.round(mm)) },
+    })),
 }));

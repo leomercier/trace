@@ -7,6 +7,7 @@ import { Viewport } from "./pixi/Viewport";
 import { DrawingLayer } from "./pixi/DrawingLayer";
 import { MeasurementLayer } from "./pixi/MeasurementLayer";
 import { CursorLayer } from "./pixi/CursorLayer";
+import { GridLayer } from "./pixi/GridLayer";
 import { PlacedItemsLayer } from "./pixi/PlacedItemsLayer";
 import { SnapIndex } from "./pixi/Snapping";
 
@@ -37,6 +38,7 @@ export function Canvas({
   const apiRef = useRef<{
     app: PIXI.Application;
     viewport: Viewport;
+    gridLayer: GridLayer;
     drawingLayer: DrawingLayer;
     measureLayer: MeasurementLayer;
     placedLayer: PlacedItemsLayer;
@@ -71,10 +73,13 @@ export function Canvas({
       const viewport = new Viewport(app);
       viewport.setSize(rect.width, rect.height);
 
+      const gridLayer = new GridLayer(viewport);
+      gridLayer.setSize(rect.width, rect.height);
       const drawingLayer = new DrawingLayer();
       const placedLayer = new PlacedItemsLayer(viewport);
       const measureLayer = new MeasurementLayer(viewport);
       const cursorLayer = new CursorLayer(viewport);
+      viewport.world.addChild(gridLayer);
       viewport.world.addChild(drawingLayer);
       viewport.world.addChild(placedLayer);
       viewport.world.addChild(measureLayer);
@@ -87,6 +92,7 @@ export function Canvas({
       apiRef.current = {
         app,
         viewport,
+        gridLayer,
         drawingLayer,
         placedLayer,
         measureLayer,
@@ -107,6 +113,7 @@ export function Canvas({
         const r = host.getBoundingClientRect();
         app.renderer.resize(r.width, r.height);
         viewport.setSize(r.width, r.height);
+        gridLayer.setSize(r.width, r.height);
       };
       window.addEventListener("resize", onResize);
       (app as any)._onResize = onResize;
@@ -130,9 +137,19 @@ export function Canvas({
 
   // Subscribe to entities and re-render the drawing layer
   useEffect(() => {
+    const renderGrid = (state: any) => {
+      const a = apiRef.current;
+      if (!a) return;
+      a.gridLayer.visible = !!state.grid?.visible;
+      const realPerUnit = state.scale?.realPerUnit ?? 1;
+      const cell = (state.grid?.sizeMM || 1000) / (realPerUnit > 0 ? realPerUnit : 1);
+      a.gridLayer.render(cell);
+    };
+
     const unsub = useEditor.subscribe((state, prev) => {
       const a = apiRef.current;
       if (!a) return;
+      if (state.grid !== prev.grid || state.scale !== prev.scale) renderGrid(state);
       if (state.entities !== prev.entities) {
         a.drawingLayer.render(state.entities);
         a.snap.build(state.entities);
@@ -174,6 +191,7 @@ export function Canvas({
         a.cursorLayer.render(Object.values(state.cursors));
       }
       if (state.view !== prev.view) {
+        renderGrid(state);
         a.measureLayer.render(
           Object.values(state.measurements),
           state.selection?.kind === "measurement" ? state.selection.id : null,
@@ -188,6 +206,8 @@ export function Canvas({
         a.cursorLayer.render(Object.values(state.cursors));
       }
     });
+    // initial render
+    renderGrid(useEditor.getState());
     return () => unsub();
   }, []);
 
@@ -199,11 +219,42 @@ export function Canvas({
 
   function fitToContent() {
     const a = apiRef.current;
-    const b = useEditor.getState().bounds;
-    if (a && b) {
-      a.viewport.fitTo(b);
-      pushView();
+    if (!a) return;
+    const state = useEditor.getState();
+    if (state.bounds && Number.isFinite(state.bounds.minX)) {
+      a.viewport.fitTo(state.bounds);
+    } else {
+      // No source drawing yet — try to fit the union of placed items + measurements.
+      // If there's nothing to fit either, just centre at origin at 1:1.
+      const items = Object.values(state.placedItems);
+      const measurements = Object.values(state.measurements);
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const it of items) {
+        const x = Number(it.x);
+        const y = Number(it.y);
+        const w = it.width_mm / (state.scale?.realPerUnit || 1);
+        const d = it.depth_mm / (state.scale?.realPerUnit || 1);
+        minX = Math.min(minX, x - w / 2);
+        minY = Math.min(minY, y - d / 2);
+        maxX = Math.max(maxX, x + w / 2);
+        maxY = Math.max(maxY, y + d / 2);
+      }
+      for (const m of measurements) {
+        minX = Math.min(minX, +m.ax, +m.bx);
+        minY = Math.min(minY, +m.ay, +m.by);
+        maxX = Math.max(maxX, +m.ax, +m.bx);
+        maxY = Math.max(maxY, +m.ay, +m.by);
+      }
+      if (Number.isFinite(minX) && minX < maxX && minY < maxY) {
+        a.viewport.fitTo({ minX, minY, maxX, maxY });
+      } else {
+        // Empty page — centre on (0,0) at zoom 1
+        const r = a.app.renderer;
+        a.viewport.position = { x: r.width / 2, y: r.height / 2 };
+        a.viewport.scale = 1;
+      }
     }
+    pushView();
   }
 
   function attachInteractions() {

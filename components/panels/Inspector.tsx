@@ -4,7 +4,7 @@ import { useEditor } from "@/stores/editorStore";
 import { formatLength, type Unit } from "@/lib/utils/units";
 import { useState } from "react";
 import type { Measurement, PlacedItem } from "@/lib/supabase/types";
-import { Trash2, RotateCw } from "lucide-react";
+import { Trash2, RotateCw, Download } from "lucide-react";
 
 export function Inspector({
   pageName,
@@ -13,6 +13,7 @@ export function Inspector({
   onRenameMeasurement,
   onDeleteMeasurement,
   onUpdatePlacedItem,
+  onExportPng,
   scaleControls,
 }: {
   pageName: string;
@@ -21,6 +22,7 @@ export function Inspector({
   onRenameMeasurement: (id: string, label: string | null) => void;
   onDeleteMeasurement: (id: string) => void;
   onUpdatePlacedItem: (id: string, patch: Partial<PlacedItem>) => void;
+  onExportPng: () => void;
   scaleControls: React.ReactNode;
 }) {
   const selection = useEditor((s) => s.selection);
@@ -30,6 +32,9 @@ export function Inspector({
   const scale = useEditor((s) => s.scale);
   const layers = useEditor((s) => s.layers);
   const toggleLayer = useEditor((s) => s.toggleLayer);
+  const grid = useEditor((s) => s.grid);
+  const toggleGrid = useEditor((s) => s.toggleGrid);
+  const setGridSize = useEditor((s) => s.setGridSize);
   const canEdit = useEditor((s) => s.canEdit);
 
   const [name, setName] = useState(pageName);
@@ -74,7 +79,7 @@ export function Inspector({
       <div className="border-b border-border p-4">
         <div className="text-xs uppercase tracking-wider text-ink-faint">Layers</div>
         <div className="mt-2 space-y-2">
-          {(["measurements", "notes", "cursors"] as const).map((k) => (
+          {(["measurements", "notes", "items", "cursors"] as const).map((k) => (
             <label key={k} className="flex cursor-pointer items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -86,6 +91,50 @@ export function Inspector({
             </label>
           ))}
         </div>
+      </div>
+
+      <div className="border-b border-border p-4">
+        <div className="flex items-center justify-between">
+          <div className="text-xs uppercase tracking-wider text-ink-faint">Grid</div>
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-muted">
+            <input
+              type="checkbox"
+              checked={grid.visible}
+              onChange={toggleGrid}
+              className="accent-ink"
+            />
+            Show
+          </label>
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            type="number"
+            min={1}
+            value={grid.sizeMM}
+            onChange={(e) => {
+              const n = parseInt(e.target.value, 10);
+              if (Number.isFinite(n) && n > 0) setGridSize(n);
+            }}
+            disabled={!grid.visible}
+            className="h-9 w-24 rounded-md border border-border bg-panel px-2 font-num text-sm focus:border-ink focus:outline-none disabled:bg-panel-muted disabled:text-ink-faint"
+          />
+          <span className="text-xs text-ink-muted">mm per cell</span>
+        </div>
+        {!scale ? (
+          <div className="mt-2 text-[11px] text-ink-faint">
+            Calibrate scale for the grid to match real units.
+          </div>
+        ) : null}
+      </div>
+
+      <div className="border-b border-border p-4">
+        <div className="text-xs uppercase tracking-wider text-ink-faint">Export</div>
+        <button
+          onClick={onExportPng}
+          className="mt-2 flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-border bg-panel-muted text-sm hover:bg-panel"
+        >
+          <Download size={14} /> Export as PNG
+        </button>
       </div>
 
       {placedSel ? (
