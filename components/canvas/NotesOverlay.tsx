@@ -239,7 +239,11 @@ function StickyNote({
           />
         ) : (
           <div data-role="text" className="whitespace-pre-wrap break-words">
-            {n.text || (canEdit ? <span className="opacity-50">Double-click to edit</span> : null)}
+            {n.text ? (
+              <RichText text={n.text} />
+            ) : canEdit ? (
+              <span className="opacity-50">Double-click to edit</span>
+            ) : null}
           </div>
         )}
       </div>
@@ -386,4 +390,46 @@ function FormatToolbar({
       </button>
     </div>
   );
+}
+
+/**
+ * Renders note text with bare URLs auto-linked as <a> tags. Click stops
+ * propagation so the click doesn't trigger the note's drag-start logic.
+ */
+function RichText({ text }: { text: string }) {
+  const URL_RX = /(https?:\/\/[^\s]+)/g;
+  const parts = text.split(URL_RX);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (URL_RX.test(part)) {
+          // Reset lastIndex because .test consumes state on /g regexes.
+          URL_RX.lastIndex = 0;
+          return (
+            <a
+              key={i}
+              href={part}
+              target="_blank"
+              rel="noreferrer noopener"
+              onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="text-current underline underline-offset-2 hover:no-underline"
+            >
+              {prettyUrl(part)}
+            </a>
+          );
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
+  );
+}
+
+function prettyUrl(u: string): string {
+  try {
+    const parsed = new URL(u);
+    return parsed.host + (parsed.pathname === "/" ? "" : parsed.pathname);
+  } catch {
+    return u;
+  }
 }

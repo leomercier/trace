@@ -3,7 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Copy, LogOut, Maximize2, Package, Share2, Sparkles } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Copy,
+  LogOut,
+  Maximize2,
+  Package,
+  Share2,
+  Sparkles,
+} from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { PageMenu } from "./PageMenu";
 import { createClient } from "@/lib/supabase/client";
@@ -61,6 +70,18 @@ export function EditorTopBar({
   const router = useRouter();
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  function copyShareUrl() {
+    if (typeof window === "undefined") return;
+    navigator.clipboard
+      .writeText(window.location.href)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {});
+  }
 
   useEffect(() => {
     if (!profileOpen) return;
@@ -156,16 +177,28 @@ export function EditorTopBar({
       ) : null}
 
       {isAnonymous ? (
-        <span
-          className="hidden rounded-md border border-yellow-200 bg-yellow-50 px-2 py-0.5 text-[10px] uppercase tracking-wider text-yellow-800 md:inline"
-          title={
-            expiresAt
-              ? `Sandbox — expires ${new Date(expiresAt).toLocaleString()}`
-              : "Sandbox workspace"
-          }
-        >
-          Sandbox · {expiresAt ? daysLeft(expiresAt) : "7d"}
-        </span>
+        <>
+          <button
+            onClick={copyShareUrl}
+            title="Copy public link — anyone with this URL can collaborate"
+            className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 text-xs hover:border-border-strong"
+          >
+            {copied ? <Check size={13} /> : <Copy size={13} />}
+            <span className="hidden md:inline">
+              {copied ? "Copied" : "Copy link"}
+            </span>
+          </button>
+          <span
+            className="hidden rounded-md border border-yellow-200 bg-yellow-50 px-2 py-0.5 text-[10px] uppercase tracking-wider text-yellow-800 md:inline"
+            title={
+              expiresAt
+                ? `Sandbox — expires ${new Date(expiresAt).toLocaleString()}`
+                : "Sandbox workspace"
+            }
+          >
+            Sandbox · {expiresAt ? daysLeft(expiresAt) : "7d"}
+          </span>
+        </>
       ) : null}
 
       <div ref={profileRef} className="relative">

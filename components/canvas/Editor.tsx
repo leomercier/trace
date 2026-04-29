@@ -124,7 +124,9 @@ export function Editor({ initial }: { initial: InitialData }) {
     } catch {
       return;
     }
-    // URL paste → text shape with the URL
+    // URL paste → sticky note styled as a link card. Notes are HTML
+    // overlays so the URL ends up clickable (the NotesOverlay
+    // auto-detects bare URLs in note text and renders them as anchors).
     const urlMatch = text.trim().match(/^https?:\/\/\S+$/);
     if (urlMatch) {
       const v = useEditor.getState().view;
@@ -134,14 +136,51 @@ export function Editor({ initial }: { initial: InitialData }) {
       const sy = r ? r.height / 2 : 0;
       const wx = (sx - v.x) / v.zoom;
       const wy = (sy - v.y) / v.zoom;
-      await createShape({
-        kind: "text",
-        x: wx,
-        y: wy,
-        w: 280,
-        h: 56,
+      const id = crypto.randomUUID();
+      const linkNote: Note = {
+        id,
+        page_id: initial.page.id,
+        x: wx as any,
+        y: wy as any,
+        w: 320 as any,
+        h: 80 as any,
         text: text.trim(),
-      });
+        color: "#dbeafe",
+        style: {
+          bg: "#dbeafe",
+          color: "#1e3a8a",
+          font: "Inter",
+          size: 14,
+        },
+        created_by: initial.user.id,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      useEditor.getState().upsertNote(linkNote);
+      const { data, error } = await supabase
+        .from("notes")
+        .insert({
+          id,
+          page_id: initial.page.id,
+          x: wx,
+          y: wy,
+          w: 320,
+          h: 80,
+          text: text.trim(),
+          color: "#dbeafe",
+          style: linkNote.style,
+        })
+        .select("*")
+        .single();
+      if (error) {
+        useEditor.getState().removeNote(id);
+        alert(`Couldn't paste link: ${error.message}`);
+        return;
+      }
+      if (data) {
+        useEditor.getState().upsertNote(data as Note);
+        pushUndo(() => deleteNote(id));
+      }
       return;
     }
     if (!text.startsWith("trace:clip:")) return;

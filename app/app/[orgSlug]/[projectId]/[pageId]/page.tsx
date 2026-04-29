@@ -1,5 +1,5 @@
-import { notFound } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { notFound, redirect } from "next/navigation";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { Editor } from "@/components/canvas/Editor";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +17,30 @@ export default async function EditorPage({
     .select("id, name, slug, is_anonymous, expires_at")
     .eq("slug", params.orgSlug)
     .maybeSingle();
-  if (!org) notFound();
+
+  // Org wasn't visible via RLS. Either it doesn't exist, or it's an anon
+  // sandbox the visitor isn't yet a member of. Check via service role and,
+  // if it's an anon org, route them through /join/* which signs them in
+  // anonymously and adds them as an editor.
+  if (!org) {
+    const svc = createServiceClient();
+    const { data: anonOrg } = await svc
+      .from("organisations")
+      .select("id, is_anonymous, expires_at")
+      .eq("slug", params.orgSlug)
+      .maybeSingle();
+    if (
+      anonOrg?.is_anonymous &&
+      (!anonOrg.expires_at || new Date(anonOrg.expires_at).getTime() > Date.now())
+    ) {
+      redirect(
+        `/join/${params.orgSlug}?next=${encodeURIComponent(
+          `/app/${params.orgSlug}/${params.projectId}/${params.pageId}`,
+        )}`,
+      );
+    }
+    notFound();
+  }
 
   const { data: page } = await supabase
     .from("pages")
@@ -27,13 +50,26 @@ export default async function EditorPage({
     .maybeSingle();
   if (!page) notFound();
 
+  // Membership check. If they have a session and aren't a member yet, but
+  // the org is anonymous, auto-join semantics still apply (the prior
+  // service-role redirect handles the no-session case; this branch covers
+  // already-signed-in users hitting someone else's sandbox).
   const { data: mem } = await supabase
     .from("organisation_members")
     .select("role")
     .eq("organisation_id", org.id)
     .eq("user_id", u.user!.id)
     .maybeSingle();
-  if (!mem) notFound();
+  if (!mem) {
+    if (org.is_anonymous) {
+      redirect(
+        `/join/${org.slug}?next=${encodeURIComponent(
+          `/app/${org.slug}/${params.projectId}/${params.pageId}`,
+        )}`,
+      );
+    }
+    notFound();
+  }
 
   const [
     { data: project },
