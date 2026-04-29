@@ -28,7 +28,11 @@ export default async function Landing() {
   }
 
   return (
-    <main className="min-h-screen bg-trace-white text-trace-black">
+    // overflow-x:clip stops any over-wide descendant (SVG illustrations,
+    // tracked-out captions, etc.) from causing a horizontal scrollbar on
+    // mobile. `clip` is preferred over `hidden` because it doesn't make
+    // <main> a scroll container — the sticky header still works.
+    <main className="min-h-screen overflow-x-clip bg-trace-white text-trace-black">
       <Header />
       <SectionWhite />
       <SectionOrange />
