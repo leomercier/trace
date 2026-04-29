@@ -32,6 +32,11 @@ const TOOLS: {
   { id: "text", label: "Text", icon: Type, key: "T" },
   { id: "line", label: "Line", icon: Slash, key: "L" },
   { id: "rect", label: "Rectangle", icon: Square, key: "R" },
+];
+
+// Tools surfaced in the overflow menu (chevron on the right of the toolbar)
+// rather than inline. Keeps the main bar narrow enough for a 375pt phone.
+const OVERFLOW_TOOLS: { id: Tool; label: string; icon: typeof Hand; key: string }[] = [
   { id: "calibrate", label: "Calibrate", icon: Crosshair, key: "C" },
 ];
 
@@ -51,6 +56,7 @@ export function Toolbar({
   const canEdit = useEditor((s) => s.canEdit);
 
   const items = TOOLS.filter((t) => canEdit || t.viewerOk);
+  const overflowItems = OVERFLOW_TOOLS.filter(() => canEdit);
 
   const [moreOpen, setMoreOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -79,19 +85,18 @@ export function Toolbar({
       )}
       style={{ marginBottom: "env(safe-area-inset-bottom)" }}
     >
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-0.5 md:gap-1">
         {items.map((t) => (
           <button
             key={t.id}
             title={`${t.label} (${t.key})`}
             onClick={() => setTool(t.id)}
             className={cn(
-              "flex h-11 w-11 items-center justify-center rounded text-ink-muted hover:bg-panel-muted hover:text-ink md:h-10 md:w-10",
+              "flex size-9 items-center justify-center rounded text-ink-muted hover:bg-panel-muted hover:text-ink md:size-10",
               tool === t.id && "bg-ink text-white hover:bg-ink hover:text-white",
             )}
           >
-            <t.icon size={18} className="md:hidden" />
-            <t.icon size={16} className="hidden md:block" />
+            <t.icon size={16} />
           </button>
         ))}
 
@@ -101,23 +106,13 @@ export function Toolbar({
             onClick={() => setMoreOpen((v) => !v)}
             title="More"
             className={cn(
-              "flex h-11 w-11 items-center justify-center rounded text-ink-muted hover:bg-panel-muted hover:text-ink md:h-10 md:w-10",
+              "flex size-9 items-center justify-center rounded text-ink-muted hover:bg-panel-muted hover:text-ink md:size-10",
               moreOpen && "bg-panel-muted text-ink",
             )}
           >
             <ChevronRight
-              size={18}
-              className={cn(
-                "transition-transform md:hidden",
-                moreOpen && "rotate-180",
-              )}
-            />
-            <ChevronRight
               size={16}
-              className={cn(
-                "hidden transition-transform md:block",
-                moreOpen && "rotate-180",
-              )}
+              className={cn("transition-transform", moreOpen && "rotate-180")}
             />
             {attachmentCount > 0 ? (
               <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-measure px-1 font-num text-[10px] text-white">
@@ -128,9 +123,26 @@ export function Toolbar({
 
           {moreOpen ? (
             <div
-              className="absolute bottom-full left-1/2 mb-2 flex -translate-x-1/2 items-center gap-1 rounded-md border border-border bg-panel p-1 shadow-md"
+              className="absolute bottom-full right-0 mb-2 flex flex-wrap items-center gap-1 rounded-md border border-border bg-panel p-1 shadow-md"
               style={{ minWidth: 160 }}
             >
+              {overflowItems.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    setTool(t.id);
+                    setMoreOpen(false);
+                  }}
+                  title={`${t.label} (${t.key})`}
+                  className={cn(
+                    "flex h-10 flex-col items-center justify-center gap-0.5 rounded px-2 text-[10px] hover:bg-panel-muted",
+                    tool === t.id ? "bg-ink text-white hover:bg-ink" : "text-ink-muted hover:text-ink",
+                  )}
+                >
+                  <t.icon size={16} />
+                  <span>{t.label}</span>
+                </button>
+              ))}
               {onOpenAttachments ? (
                 <button
                   onClick={() => {

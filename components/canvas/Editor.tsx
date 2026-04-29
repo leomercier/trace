@@ -42,6 +42,8 @@ interface InitialData {
   user: { id: string; name: string; email: string; avatar: string | null };
   orgId: string;
   orgSlug: string;
+  orgIsAnonymous: boolean;
+  orgExpiresAt: string | null;
   projectId: string;
   projectName: string;
   pages: { id: string; name: string }[];
@@ -122,7 +124,9 @@ export function Editor({ initial }: { initial: InitialData }) {
     } catch {
       return;
     }
-    // URL paste → text shape with the URL
+    // URL paste → sticky note styled as a link card. Notes are HTML
+    // overlays so the URL ends up clickable (the NotesOverlay
+    // auto-detects bare URLs in note text and renders them as anchors).
     const urlMatch = text.trim().match(/^https?:\/\/\S+$/);
     if (urlMatch) {
       const v = useEditor.getState().view;
@@ -132,14 +136,51 @@ export function Editor({ initial }: { initial: InitialData }) {
       const sy = r ? r.height / 2 : 0;
       const wx = (sx - v.x) / v.zoom;
       const wy = (sy - v.y) / v.zoom;
-      await createShape({
-        kind: "text",
-        x: wx,
-        y: wy,
-        w: 280,
-        h: 56,
+      const id = crypto.randomUUID();
+      const linkNote: Note = {
+        id,
+        page_id: initial.page.id,
+        x: wx as any,
+        y: wy as any,
+        w: 320 as any,
+        h: 80 as any,
         text: text.trim(),
-      });
+        color: "#dbeafe",
+        style: {
+          bg: "#dbeafe",
+          color: "#1e3a8a",
+          font: "Inter",
+          size: 14,
+        },
+        created_by: initial.user.id,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      useEditor.getState().upsertNote(linkNote);
+      const { data, error } = await supabase
+        .from("notes")
+        .insert({
+          id,
+          page_id: initial.page.id,
+          x: wx,
+          y: wy,
+          w: 320,
+          h: 80,
+          text: text.trim(),
+          color: "#dbeafe",
+          style: linkNote.style,
+        })
+        .select("*")
+        .single();
+      if (error) {
+        useEditor.getState().removeNote(id);
+        alert(`Couldn't paste link: ${error.message}`);
+        return;
+      }
+      if (data) {
+        useEditor.getState().upsertNote(data as Note);
+        pushUndo(() => deleteNote(id));
+      }
       return;
     }
     if (!text.startsWith("trace:clip:")) return;
@@ -234,21 +275,44 @@ export function Editor({ initial }: { initial: InitialData }) {
       sortOrder: number;
       visible: boolean;
     }) {
+      // Best-effort: a missing/unknown type shouldn't break the whole
+      // page. Try to recover by re-inferring from the filename, and if
+      // that's still "other", skip the layer with a console warning.
+      let type = args.type;
+      if (!type || type === "other") {
+        const inferred = inferFileType(args.name || "");
+        if (inferred !== "other") {
+          type = inferred;
+        } else {
+          console.warn(
+            `[trace] skipping drawing "${args.name}" — unsupported type "${args.type}"`,
+          );
+          return null;
+        }
+      }
       const res = await fetch(args.signedUrl);
       const blob = await res.blob();
       const hash = await hashBlob(blob);
-      const cacheable = args.type === "dxf" || args.type === "dwg";
+      const cacheable = type === "dxf" || type === "dwg";
       const cached = cacheable ? await idbCacheGet(hash) : null;
       let parsed = cached;
       if (!parsed) {
-        parsed = await parseFile(blob, args.type);
-        if (cacheable) await idbCacheSet(hash, parsed);
+        try {
+          parsed = await parseFile(blob, type);
+          if (cacheable) await idbCacheSet(hash, parsed);
+        } catch (err) {
+          console.error(
+            `[trace] failed to parse "${args.name}" (${type}):`,
+            err,
+          );
+          return null;
+        }
       }
       if (cancelled) return null;
       useEditor.getState().upsertDrawing({
         id: args.id,
         name: args.name,
-        fileType: args.type,
+        fileType: type,
         entities: parsed.entities,
         bounds: parsed.bounds,
         visible: args.visible,
@@ -506,11 +570,14 @@ export function Editor({ initial }: { initial: InitialData }) {
     h: number;
     text?: string;
   }) {
-    const optimisticId = `tmp-${crypto.randomUUID()}`;
+    // Use a real UUID up front — no tmp/swap dance. If the insert fails
+    // (table missing, RLS blocked, network), we revert and surface the
+    // error instead of silently dropping the user's shape.
+    const id = crypto.randomUUID();
     const isText = args.kind === "text";
     const isLine = args.kind === "line";
     const optimistic: Shape = {
-      id: optimisticId,
+      id,
       page_id: initial.page.id,
       kind: args.kind,
       x: args.x as any,
@@ -521,7 +588,7 @@ export function Editor({ initial }: { initial: InitialData }) {
       stroke: "#1c1917",
       stroke_width: isLine ? 2 : 1.5,
       stroke_opacity: 1,
-      fill: isText ? null : args.kind === "rect" ? null : null,
+      fill: null,
       fill_opacity: 1,
       text: args.text ?? null,
       style: isText ? { font: "Inter", size: 24, color: "#1c1917" } : null,
@@ -532,12 +599,13 @@ export function Editor({ initial }: { initial: InitialData }) {
       updated_at: new Date().toISOString(),
     };
     useEditor.getState().upsertShape(optimistic);
-    useEditor.getState().setSelection({ kind: "shape", id: optimisticId });
+    useEditor.getState().setSelection({ kind: "shape", id });
     useEditor.getState().setTool("select");
 
     const { data, error } = await supabase
       .from("shapes")
       .insert({
+        id,
         page_id: initial.page.id,
         kind: optimistic.kind,
         x: optimistic.x,
@@ -552,12 +620,18 @@ export function Editor({ initial }: { initial: InitialData }) {
       })
       .select("*")
       .single();
-    useEditor.getState().removeShape(optimisticId);
-    if (!error && data) {
+    if (error) {
+      console.error("[trace] failed to create shape:", error);
+      useEditor.getState().removeShape(id);
+      alert(
+        `Couldn't save the ${args.kind}: ${error.message}\n\n` +
+          "If this is a new project, run supabase/bootstrap.sql in Supabase Studio, then redeploy.",
+      );
+      return;
+    }
+    if (data) {
       useEditor.getState().upsertShape(data as Shape);
-      useEditor.getState().setSelection({ kind: "shape", id: (data as any).id });
-      const newId = (data as any).id as string;
-      pushUndo(() => deleteShape(newId));
+      pushUndo(() => deleteShape(id));
     }
   }
 
@@ -577,9 +651,9 @@ export function Editor({ initial }: { initial: InitialData }) {
 
   async function createMeasurement(a: { x: number; y: number }, b: { x: number; y: number }) {
     const s = useEditor.getState();
-    const optimisticId = `tmp-${crypto.randomUUID()}`;
+    const id = crypto.randomUUID();
     const optimistic: Measurement = {
-      id: optimisticId,
+      id,
       page_id: initial.page.id,
       ax: a.x as any,
       ay: a.y as any,
@@ -596,6 +670,7 @@ export function Editor({ initial }: { initial: InitialData }) {
     const { data, error } = await supabase
       .from("measurements")
       .insert({
+        id,
         page_id: initial.page.id,
         ax: a.x,
         ay: a.y,
@@ -604,11 +679,15 @@ export function Editor({ initial }: { initial: InitialData }) {
       })
       .select("*")
       .single();
-    s.removeMeasurement(optimisticId);
-    if (!error && data) {
+    if (error) {
+      console.error("[trace] failed to create measurement:", error);
+      s.removeMeasurement(id);
+      alert(`Couldn't save measurement: ${error.message}`);
+      return;
+    }
+    if (data) {
       s.upsertMeasurement(data as any);
-      const newId = (data as any).id as string;
-      pushUndo(() => deleteMeasurement(newId));
+      pushUndo(() => deleteMeasurement(id));
     }
   }
 
@@ -624,9 +703,9 @@ export function Editor({ initial }: { initial: InitialData }) {
   }
 
   async function createNote(p: { x: number; y: number }) {
-    const optimisticId = `tmp-${crypto.randomUUID()}`;
+    const id = crypto.randomUUID();
     const optimistic: Note = {
-      id: optimisticId,
+      id,
       page_id: initial.page.id,
       x: p.x as any,
       y: p.y as any,
@@ -643,6 +722,7 @@ export function Editor({ initial }: { initial: InitialData }) {
     const { data, error } = await supabase
       .from("notes")
       .insert({
+        id,
         page_id: initial.page.id,
         x: p.x,
         y: p.y,
@@ -652,11 +732,15 @@ export function Editor({ initial }: { initial: InitialData }) {
       })
       .select("*")
       .single();
-    useEditor.getState().removeNote(optimisticId);
-    if (!error && data) {
+    if (error) {
+      console.error("[trace] failed to create note:", error);
+      useEditor.getState().removeNote(id);
+      alert(`Couldn't save note: ${error.message}`);
+      return;
+    }
+    if (data) {
       useEditor.getState().upsertNote(data as any);
-      const newId = (data as any).id as string;
-      pushUndo(() => deleteNote(newId));
+      pushUndo(() => deleteNote(id));
     }
   }
 
@@ -704,9 +788,9 @@ export function Editor({ initial }: { initial: InitialData }) {
 
   async function placeItem(inv: InventoryItem, world: { x: number; y: number }) {
     if (initial.role === "viewer") return;
-    const optimisticId = `tmp-${crypto.randomUUID()}`;
+    const id = crypto.randomUUID();
     const optimistic: PlacedItem = {
-      id: optimisticId,
+      id,
       page_id: initial.page.id,
       inventory_item_id: inv.id,
       name: inv.name,
@@ -727,11 +811,12 @@ export function Editor({ initial }: { initial: InitialData }) {
       updated_at: new Date().toISOString(),
     };
     useEditor.getState().upsertPlacedItem(optimistic);
-    useEditor.getState().setSelection({ kind: "placed", id: optimisticId });
+    useEditor.getState().setSelection({ kind: "placed", id });
 
     const { data, error } = await supabase
       .from("placed_items")
       .insert({
+        id,
         page_id: initial.page.id,
         inventory_item_id: inv.id,
         name: inv.name,
@@ -745,12 +830,15 @@ export function Editor({ initial }: { initial: InitialData }) {
       })
       .select("*")
       .single();
-    useEditor.getState().removePlacedItem(optimisticId);
-    if (!error && data) {
+    if (error) {
+      console.error("[trace] failed to place item:", error);
+      useEditor.getState().removePlacedItem(id);
+      alert(`Couldn't place item: ${error.message}`);
+      return;
+    }
+    if (data) {
       useEditor.getState().upsertPlacedItem(data as PlacedItem);
-      useEditor.getState().setSelection({ kind: "placed", id: (data as any).id });
-      const newId = (data as any).id as string;
-      pushUndo(() => deletePlacedItem(newId));
+      pushUndo(() => deletePlacedItem(id));
     }
   }
 
@@ -854,6 +942,13 @@ export function Editor({ initial }: { initial: InitialData }) {
     let fileName = file.name;
     let detected = inferFileType(file.name);
 
+    if (detected === "other") {
+      alert(
+        `Couldn't add "${file.name}". Trace supports DWG, DXF, PDF, SVG, PNG, JPG, GIF, WEBP, BMP.`,
+      );
+      return;
+    }
+
     // Convert DWG → DXF in the browser at upload time. The DXF is what gets
     // persisted; the original DWG is never stored. From the page's
     // perspective the source is now a DXF, and the existing parser path
@@ -866,7 +961,11 @@ export function Editor({ initial }: { initial: InitialData }) {
         const dxf = await convertDwgToDxf(file);
         if (!dxf) {
           alert(
-            "Could not convert this DWG. Try saving it as DXF in your CAD app and dropping that instead.",
+            "Couldn't open this DWG.\n\n" +
+              "The browser-side converter only supports DWG files saved in AutoCAD R12–R2018 formats. " +
+              "Newer 2019+ files often fail.\n\n" +
+              "Easiest fix: in your CAD app, Save As → DXF (any version) or Export as PDF. " +
+              "Drop that file instead — both render natively in Trace.",
           );
           setDwgConverting(false);
           setUploadStatus(null);
@@ -985,7 +1084,10 @@ export function Editor({ initial }: { initial: InitialData }) {
     <div className="flex h-screen w-full flex-col">
       <div className="hidden md:block">
         <EditorTopBar
+          orgId={initial.orgId}
           orgSlug={initial.orgSlug}
+          isAnonymous={initial.orgIsAnonymous}
+          expiresAt={initial.orgExpiresAt}
           projectId={initial.projectId}
           projectName={initial.projectName}
           currentPageId={initial.page.id}
@@ -1290,43 +1392,61 @@ function FileDropOverlay({
   onUpload: (f: File) => void;
 }) {
   const [over, setOver] = useState(false);
+
+  // Drag events have to be attached to the document, not a `pointer-events:
+  // none` div — the latter is invisible to drag events, which is why the
+  // earlier overlay-based version never fired. We track a counter rather
+  // than a boolean because dragenter/dragleave both fire as the cursor
+  // crosses child elements, and the boolean approach flickers.
+  useEffect(() => {
+    let depth = 0;
+    const hasFiles = (e: DragEvent) =>
+      Array.from(e.dataTransfer?.types || []).includes("Files");
+    const onDragEnter = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth++;
+      if (depth === 1) setOver(true);
+    };
+    const onDragOver = (e: DragEvent) => {
+      if (hasFiles(e)) e.preventDefault();
+    };
+    const onDragLeave = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setOver(false);
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth = 0;
+      setOver(false);
+      const f = e.dataTransfer?.files?.[0];
+      if (f) onUpload(f);
+    };
+    document.addEventListener("dragenter", onDragEnter);
+    document.addEventListener("dragover", onDragOver);
+    document.addEventListener("dragleave", onDragLeave);
+    document.addEventListener("drop", onDrop);
+    return () => {
+      document.removeEventListener("dragenter", onDragEnter);
+      document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("dragleave", onDragLeave);
+      document.removeEventListener("drop", onDrop);
+    };
+  }, [onUpload]);
+
   return (
     <>
-      {/* Always-on file-drop catcher. pointer-events-none so it never blocks
-          measurement / note / item interactions; only enables when a drag
-          enters the window. */}
-      <div
-        onDragEnter={(e) => {
-          if (e.dataTransfer.types?.includes("Files")) setOver(true);
-        }}
-        onDragOver={(e) => {
-          if (e.dataTransfer.types?.includes("Files")) {
-            e.preventDefault();
-            setOver(true);
-          }
-        }}
-        onDragLeave={(e) => {
-          // only leave if we left the overlay container itself
-          if (e.currentTarget === e.target) setOver(false);
-        }}
-        onDrop={(e) => {
-          e.preventDefault();
-          setOver(false);
-          const f = e.dataTransfer.files?.[0];
-          if (f) onUpload(f);
-        }}
-        className={`absolute inset-0 z-20 ${
-          over ? "pointer-events-auto" : "pointer-events-none"
-        }`}
-      >
-        {over ? (
+      {over ? (
+        <div className="pointer-events-none absolute inset-0 z-20">
           <div className="m-8 flex h-[calc(100%-4rem)] flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-ink bg-panel-muted/90 text-ink backdrop-blur-sm">
             <Upload size={28} />
             <p className="font-serif text-2xl">Drop to upload</p>
             <p className="text-sm text-ink-muted">DWG, DXF, PDF, SVG, PNG, JPG</p>
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       {empty ? (
         <label className="pointer-events-auto absolute left-1/2 top-4 z-10 flex h-9 -translate-x-1/2 cursor-pointer items-center gap-1.5 rounded-md border border-dashed border-border bg-panel px-3 text-sm text-ink-muted hover:border-border-strong hover:text-ink">

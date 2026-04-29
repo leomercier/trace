@@ -1,83 +1,92 @@
-import { createClient } from "@/lib/supabase/server";
-import Link from "next/link";
-import { notFound } from "next/navigation";
-import { NewProjectButton } from "@/components/app/NewProjectButton";
-import { formatDate } from "@/lib/utils/date";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { notFound, redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Org home is a redirect-only route — we deliberately don't show a project
+ * list. Instead, we drop the user straight into the canvas of the most
+ * recently-edited page in the org. If the org has no projects/pages yet,
+ * we create a starter project + page automatically and redirect there.
+ *
+ * The full project/page management UI lives inside the editor (page menu
+ * in the top bar). No reason to bounce the user through extra screens.
+ */
 export default async function OrgHome({
   params,
 }: {
   params: { orgSlug: string };
 }) {
   const supabase = createClient();
+  const { data: u } = await supabase.auth.getUser();
 
   const { data: org } = await supabase
     .from("organisations")
-    .select("id, name, slug")
+    .select("id, slug")
     .eq("slug", params.orgSlug)
     .maybeSingle();
   if (!org) notFound();
 
+  // Pick the most recently updated page across all projects in this org.
   const { data: projects } = await supabase
     .from("projects")
-    .select("id, name, description, created_at, updated_at")
+    .select("id, updated_at")
     .eq("organisation_id", org.id)
-    .order("updated_at", { ascending: false });
+    .order("updated_at", { ascending: false })
+    .limit(1);
 
-  const { data: u } = await supabase.auth.getUser();
-  const { data: mem } = await supabase
-    .from("organisation_members")
-    .select("role")
-    .eq("organisation_id", org.id)
-    .eq("user_id", u.user!.id)
+  let projectId = projects?.[0]?.id;
+
+  if (!projectId) {
+    // Empty org → bootstrap a starter project + page via service role so we
+    // never hit RLS gotchas during onboarding.
+    const svc = createServiceClient();
+    const { data: project } = await svc
+      .from("projects")
+      .insert({
+        organisation_id: org.id,
+        name: "Untitled project",
+        created_by: u.user?.id ?? null,
+      })
+      .select("id")
+      .single();
+    if (!project) {
+      // Surface a soft failure rather than crashing — fall back to /app.
+      redirect("/app");
+    }
+    projectId = project!.id;
+    await svc
+      .from("pages")
+      .insert({
+        project_id: projectId,
+        name: "Untitled page",
+        created_by: u.user?.id ?? null,
+      });
+  }
+
+  const { data: page } = await supabase
+    .from("pages")
+    .select("id")
+    .eq("project_id", projectId!)
+    .order("updated_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
-  const canCreate = mem?.role === "owner" || mem?.role === "admin" || mem?.role === "editor";
+  let pageId = page?.id;
+  if (!pageId) {
+    const svc = createServiceClient();
+    const { data: created } = await svc
+      .from("pages")
+      .insert({
+        project_id: projectId!,
+        name: "Untitled page",
+        created_by: u.user?.id ?? null,
+      })
+      .select("id")
+      .single();
+    pageId = created?.id;
+  }
 
-  return (
-    <main className="mx-auto max-w-6xl px-6 pt-10">
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="font-serif text-4xl tracking-tight">Projects</h1>
-          <p className="mt-1 text-ink-muted">{org.name}</p>
-        </div>
-        {canCreate ? <NewProjectButton orgId={org.id} orgSlug={org.slug} /> : null}
-      </div>
-
-      <ul className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {(projects || []).map((p) => (
-          <li key={p.id}>
-            <Link
-              href={`/app/${org.slug}/${p.id}`}
-              className="block h-full rounded-lg border border-border bg-panel p-5 transition-colors hover:border-border-strong"
-            >
-              <div className="font-serif text-xl">{p.name}</div>
-              {p.description ? (
-                <p className="mt-1 line-clamp-2 text-sm text-ink-muted">
-                  {p.description}
-                </p>
-              ) : null}
-              <div className="mt-4 text-xs text-ink-faint">
-                Updated {formatDate(p.updated_at)}
-              </div>
-            </Link>
-          </li>
-        ))}
-        {(!projects || projects.length === 0) && (
-          <li className="md:col-span-2 lg:col-span-3">
-            <div className="rounded-lg border border-dashed border-border bg-panel/50 p-10 text-center">
-              <p className="text-ink-muted">No projects yet.</p>
-              {canCreate ? (
-                <div className="mt-4">
-                  <NewProjectButton orgId={org.id} orgSlug={org.slug} />
-                </div>
-              ) : null}
-            </div>
-          </li>
-        )}
-      </ul>
-    </main>
-  );
+  if (!pageId) redirect("/app");
+  redirect(`/app/${org.slug}/${projectId}/${pageId}`);
 }

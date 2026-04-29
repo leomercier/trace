@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Github, Download } from "lucide-react";
+import { ArrowRight, Github } from "lucide-react";
 import { TraceLogo, TraceWordmark } from "@/components/marketing/TraceLogo";
 import { SectionLabel } from "@/components/marketing/SectionLabel";
 import { HeroVisual } from "@/components/marketing/HeroVisual";
@@ -97,20 +97,29 @@ function SectionWhite() {
           </p>
           <div className="mt-10 flex flex-wrap items-center gap-3">
             <Link
-              href="/signup"
+              href="/new"
               className="inline-flex h-12 items-center justify-center rounded-md bg-trace-black px-6 text-trace-white hover:opacity-90"
             >
-              <Download className="mr-2 size-4" />
-              Download
+              Try in browser
+              <ArrowRight className="ml-2 size-4" />
+            </Link>
+            <Link
+              href="/signup"
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-md border border-trace-black/20 bg-trace-white px-6 text-trace-black hover:border-trace-black"
+            >
+              Create workspace
             </Link>
             <Link
               href={GITHUB_URL}
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-md border border-trace-black/20 bg-trace-white px-6 text-trace-black hover:border-trace-black"
+              className="inline-flex h-12 items-center justify-center gap-2 px-2 text-sm text-trace-black/70 hover:text-trace-black"
             >
               <Github className="size-4" />
-              View on GitHub
+              GitHub
             </Link>
           </div>
+          <p className="mt-4 font-mono text-[11px] uppercase tracking-[0.18em] text-trace-black/50">
+            Sandbox · no signup · kept for 7 days
+          </p>
 
           <dl className="mt-16 grid max-w-md grid-cols-3 gap-px border-y border-trace-black/10">
             <Stat label="License" value="MIT" />
@@ -260,11 +269,11 @@ function SectionPink() {
           </p>
           <div className="mt-10 flex flex-wrap items-center gap-3">
             <Link
-              href="/signup"
+              href="/new"
               className="inline-flex h-12 items-center justify-center rounded-md bg-trace-black px-6 text-trace-white hover:opacity-90"
             >
-              <Download className="mr-2 size-4" />
-              Download
+              Try in browser
+              <ArrowRight className="ml-2 size-4" />
             </Link>
             <Link
               href={GITHUB_URL}
@@ -284,11 +293,17 @@ function SectionPink() {
 
         <div id="hosting" className="grid gap-4">
           <HostCard
-            title="Hosted"
-            body="Sign up and start in 30 seconds. Free."
-            cta="Start on hosted"
-            href="/signup"
+            title="Sandbox"
+            body="One click. No signup. Workspace expires in 7 days — sign in to keep it."
+            cta="trace.app/new"
+            href="/new"
             primary
+          />
+          <HostCard
+            title="Hosted workspace"
+            body="Sign up and invite your team. Free for everyone, no credit card."
+            cta="Create workspace"
+            href="/signup"
           />
           <HostCard
             title="Self-host"
@@ -400,10 +415,10 @@ function SectionPlum() {
           </div>
           <div className="flex flex-wrap gap-3">
             <Link
-              href="/signup"
+              href="/new"
               className="inline-flex h-12 items-center justify-center rounded-md bg-trace-lime px-6 font-medium text-trace-black hover:opacity-90"
             >
-              Start on hosted
+              Try in browser
               <ArrowRight className="ml-2 size-4" />
             </Link>
             <Link
@@ -460,7 +475,8 @@ function Footer() {
         <FooterCol
           heading="Product"
           links={[
-            ["Download", "/signup"],
+            ["Try in browser", "/new"],
+            ["Create workspace", "/signup"],
             ["Sign in", "/login"],
             ["GitHub", GITHUB_URL],
           ]}

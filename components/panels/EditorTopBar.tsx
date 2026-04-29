@@ -3,7 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronDown, LogOut, Maximize2, Package, Share2, Sparkles } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Copy,
+  LogOut,
+  Maximize2,
+  Package,
+  Share2,
+  Sparkles,
+} from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { PageMenu } from "./PageMenu";
 import { createClient } from "@/lib/supabase/client";
@@ -21,7 +30,10 @@ interface PageRow {
  *  [hamburger] [page name]        [Fit] [Inventory] [AI] [presence] [Share] [profile]
  */
 export function EditorTopBar({
+  orgId,
   orgSlug,
+  isAnonymous,
+  expiresAt,
   projectId,
   projectName,
   currentPageId,
@@ -36,6 +48,9 @@ export function EditorTopBar({
   onShare,
   onDeletePage,
 }: {
+  orgId: string;
+  isAnonymous: boolean;
+  expiresAt: string | null;
   orgSlug: string;
   projectId: string;
   projectName: string;
@@ -55,6 +70,18 @@ export function EditorTopBar({
   const router = useRouter();
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  function copyShareUrl() {
+    if (typeof window === "undefined") return;
+    navigator.clipboard
+      .writeText(window.location.href)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {});
+  }
 
   useEffect(() => {
     if (!profileOpen) return;
@@ -149,6 +176,31 @@ export function EditorTopBar({
         </span>
       ) : null}
 
+      {isAnonymous ? (
+        <>
+          <button
+            onClick={copyShareUrl}
+            title="Copy public link — anyone with this URL can collaborate"
+            className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 text-xs hover:border-border-strong"
+          >
+            {copied ? <Check size={13} /> : <Copy size={13} />}
+            <span className="hidden md:inline">
+              {copied ? "Copied" : "Copy link"}
+            </span>
+          </button>
+          <span
+            className="hidden rounded-md border border-yellow-200 bg-yellow-50 px-2 py-0.5 text-[10px] uppercase tracking-wider text-yellow-800 md:inline"
+            title={
+              expiresAt
+                ? `Sandbox — expires ${new Date(expiresAt).toLocaleString()}`
+                : "Sandbox workspace"
+            }
+          >
+            Sandbox · {expiresAt ? daysLeft(expiresAt) : "7d"}
+          </span>
+        </>
+      ) : null}
+
       <div ref={profileRef} className="relative">
         <button
           onClick={() => setProfileOpen((v) => !v)}
@@ -159,14 +211,44 @@ export function EditorTopBar({
           <ChevronDown size={12} className="text-ink-faint" />
         </button>
         {profileOpen ? (
-          <div className="absolute right-0 top-full mt-1 w-56 rounded-md border border-border bg-panel p-1 shadow-md">
-            <div className="px-3 py-2 text-xs text-ink-faint">{user.email}</div>
+          <div className="absolute right-0 top-full mt-1 w-60 rounded-md border border-border bg-panel p-1 shadow-md">
+            <div className="px-3 py-2 text-xs text-ink-faint">
+              {user.email || "Anonymous session"}
+            </div>
+            {isAnonymous ? (
+              <Link
+                href="/signup"
+                className="mx-1 mb-1 block rounded bg-ink px-3 py-2 text-sm text-white hover:bg-black/90"
+              >
+                Sign in to keep this workspace
+              </Link>
+            ) : null}
             <Link
               href="/app"
               className="block rounded px-3 py-2 text-sm hover:bg-panel-muted"
             >
               Switch workspace
             </Link>
+            <button
+              onClick={async () => {
+                setProfileOpen(false);
+                if (!confirm("Duplicate this workspace including all projects, pages, and annotations?")) return;
+                const res = await fetch("/api/orgs/duplicate", {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ source_org_id: orgId }),
+                });
+                const json = await res.json();
+                if (!res.ok) {
+                  alert(json.error || "Duplicate failed");
+                  return;
+                }
+                window.location.href = `/app/${json.org.slug}`;
+              }}
+              className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-panel-muted"
+            >
+              <Copy size={14} /> Duplicate workspace
+            </button>
             {canAdmin ? (
               <Link
                 href={`/app/${orgSlug}/settings`}
@@ -190,4 +272,11 @@ export function EditorTopBar({
       </div>
     </header>
   );
+}
+
+function daysLeft(iso: string): string {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return "expired";
+  const days = Math.ceil(ms / (24 * 3600 * 1000));
+  return days === 1 ? "1d left" : `${days}d left`;
 }

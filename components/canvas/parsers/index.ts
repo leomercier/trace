@@ -12,11 +12,36 @@ export function inferFileType(name: string): FileType {
   if (n.endsWith(".dwg")) return "dwg";
   if (n.endsWith(".dxf")) return "dxf";
   if (n.endsWith(".pdf")) return "pdf";
-  if (n.endsWith(".svg")) return "svg";
+  if (n.endsWith(".svg") || n.endsWith(".svgz")) return "svg";
   if (n.endsWith(".png")) return "png";
-  if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "jpg";
+  if (
+    n.endsWith(".jpg") ||
+    n.endsWith(".jpeg") ||
+    n.endsWith(".jpe") ||
+    n.endsWith(".jfif") ||
+    n.endsWith(".webp") ||
+    n.endsWith(".gif") ||
+    n.endsWith(".bmp")
+  )
+    return "jpg";
   return "other";
 }
+
+export const SUPPORTED_EXTENSIONS = [
+  "dwg",
+  "dxf",
+  "pdf",
+  "svg",
+  "svgz",
+  "png",
+  "jpg",
+  "jpeg",
+  "jpe",
+  "jfif",
+  "webp",
+  "gif",
+  "bmp",
+];
 
 export async function parseFile(
   file: Blob,
@@ -41,6 +66,10 @@ export async function parseFile(
       const m = await import("./dwg");
       return m.parseDwg(file);
     }
+    case "other":
+      throw new Error(
+        "Unsupported file type. Trace renders DWG, DXF, PDF, SVG, PNG, JPG, GIF, WEBP, and BMP.",
+      );
     default:
       throw new Error(`Unsupported file type: ${type}`);
   }

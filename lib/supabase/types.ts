@@ -20,6 +20,8 @@ export interface Organisation {
   slug: string;
   created_by: string | null;
   created_at: string;
+  is_anonymous: boolean;
+  expires_at: string | null;
 }
 
 export interface OrganisationMember {
