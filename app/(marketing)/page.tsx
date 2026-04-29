@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ArrowRight, Github } from "lucide-react";
 import { TraceLogo, TraceWordmark } from "@/components/marketing/TraceLogo";
 import { SectionLabel } from "@/components/marketing/SectionLabel";
@@ -7,10 +8,25 @@ import { PathDiagram } from "@/components/marketing/PathDiagram";
 import { ComponentPanel } from "@/components/marketing/ComponentPanel";
 import { GraphicLanguage } from "@/components/marketing/GraphicLanguage";
 import { PrinciplesGrid } from "@/components/marketing/PrinciplesGrid";
+import { createClient } from "@/lib/supabase/server";
 
 const GITHUB_URL = "https://github.com/leomercier/trace";
 
-export default function Landing() {
+// Skip caching — the redirect decision depends on the per-request session
+// cookie. Without this, signed-in users would still see the cached
+// marketing HTML.
+export const dynamic = "force-dynamic";
+
+export default async function Landing() {
+  // Signed-in users go straight to their workspaces. The marketing page is
+  // for visitors deciding whether to sign up; once you have a session, the
+  // editor is what you actually want.
+  const supabase = createClient();
+  const { data } = await supabase.auth.getUser();
+  if (data.user) {
+    redirect("/app");
+  }
+
   return (
     <main className="min-h-screen bg-trace-white text-trace-black">
       <Header />
