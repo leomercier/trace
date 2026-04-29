@@ -1463,7 +1463,10 @@ function FloatingControls({
   const others = presence.filter((p) => p.userId !== user.id);
 
   return (
-    <div className="pointer-events-none fixed right-3 top-3 z-30 flex items-center gap-2">
+    <div
+      className="pointer-events-none fixed right-3 z-30 flex items-center gap-2 top-16 md:top-3"
+      style={{ paddingTop: "env(safe-area-inset-top)" }}
+    >
       {org.isAnonymous ? (
         <button
           onClick={copyShareUrl}
