@@ -10,10 +10,13 @@ const TICK_PX = 8;
 
 /**
  * Measurement lines + endpoint dots + label in red. Endpoints and labels are
- * counter-scaled so they stay constant size as the user zooms.
+ * counter-scaled so they stay constant size as the user zooms. The leader
+ * line that ties an offset label back to its midpoint is drawn into its own
+ * Graphics so we can stroke it dotted without affecting the solid main line.
  */
 export class MeasurementLayer extends PIXI.Container {
   private linesGfx = new PIXI.Graphics();
+  private leadersGfx = new PIXI.Graphics();
   private dotsGfx = new PIXI.Graphics();
   private labelLayer = new PIXI.Container();
   private draftGfx = new PIXI.Graphics();
@@ -23,6 +26,7 @@ export class MeasurementLayer extends PIXI.Container {
     this.label = "measurements";
     this.eventMode = "none";
     this.addChild(this.linesGfx);
+    this.addChild(this.leadersGfx);
     this.addChild(this.dotsGfx);
     this.addChild(this.labelLayer);
     this.addChild(this.draftGfx);
@@ -41,6 +45,7 @@ export class MeasurementLayer extends PIXI.Container {
     const px = (n: number) => n / z;
 
     this.linesGfx.clear();
+    this.leadersGfx.clear();
     this.dotsGfx.clear();
     this.labelLayer.removeChildren();
     this.labelRects = [];
@@ -72,16 +77,24 @@ export class MeasurementLayer extends PIXI.Container {
       const lx = mx + dx;
       const ly = my + dy;
 
-      // Dotted leader line from midpoint to offset label
-      if (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001) {
-        this.linesGfx
-          .moveTo(mx, my)
-          .lineTo(lx, ly)
-          .stroke({
-            color: MEASURE,
-            width: px(0.8),
-            alpha: 0.6,
-          });
+      // Dotted leader from midpoint to offset label. Pixi v8 has no native
+      // dash support, so we approximate with short stroked segments. The
+      // segment length is in screen pixels (counter-scaled to world) so the
+      // density stays consistent across zoom levels.
+      const leaderLen = Math.hypot(dx, dy);
+      if (leaderLen > 0.001) {
+        const dashPx = 4;
+        const gapPx = 3;
+        const ux = dx / leaderLen;
+        const uy = dy / leaderLen;
+        let t = 0;
+        while (t < leaderLen) {
+          const t2 = Math.min(leaderLen, t + px(dashPx));
+          this.leadersGfx
+            .moveTo(mx + ux * t, my + uy * t)
+            .lineTo(mx + ux * t2, my + uy * t2);
+          t = t2 + px(gapPx);
+        }
       }
 
       const txt = new PIXI.Text({
@@ -129,6 +142,11 @@ export class MeasurementLayer extends PIXI.Container {
       color: MEASURE,
       width: px(1.5),
       pixelLine: false,
+    });
+    this.leadersGfx.stroke({
+      color: MEASURE,
+      width: px(1),
+      alpha: 0.7,
     });
     this.dotsGfx.fill(MEASURE);
   }

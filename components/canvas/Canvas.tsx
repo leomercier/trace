@@ -11,6 +11,7 @@ import { CursorLayer } from "./pixi/CursorLayer";
 import { GridLayer } from "./pixi/GridLayer";
 import { PlacedItemsLayer } from "./pixi/PlacedItemsLayer";
 import { ShapesLayer } from "./pixi/ShapesLayer";
+import { FramesLayer } from "./pixi/FramesLayer";
 import { SnapIndex } from "./pixi/Snapping";
 
 export interface CanvasHandle {
@@ -30,12 +31,21 @@ export function Canvas({
   onDrawingTransformEnd,
   onMeasurementLabelMove,
   onMeasurementLabelMoveEnd,
+  onFrameCreate,
+  onFrameUpdate,
+  onFrameUpdateEnd,
 }: {
   onPointerWorld?: (p: { x: number; y: number; snapped: boolean }) => void;
   onClickWorld?: (p: { x: number; y: number; snapped: boolean }) => void;
   onSelectionPick?: (
-    sel: { kind: "measurement" | "placed" | "shape" | "drawing"; id: string } | null,
+    sel: { kind: "measurement" | "placed" | "shape" | "drawing" | "frame"; id: string } | null,
   ) => void;
+  onFrameCreate?: (rect: { x: number; y: number; w: number; h: number }) => void;
+  onFrameUpdate?: (
+    id: string,
+    patch: Partial<{ x: number; y: number; w: number; h: number }>,
+  ) => void;
+  onFrameUpdateEnd?: (id: string) => void;
   onCanvasReady?: (api: CanvasHandle) => void;
   onItemMove?: (id: string, x: number, y: number) => void;
   onItemResize?: (id: string, scaleW: number, scaleD: number) => void;
@@ -61,6 +71,7 @@ export function Canvas({
     measureLayer: MeasurementLayer;
     placedLayer: PlacedItemsLayer;
     shapesLayer: ShapesLayer;
+    framesLayer: FramesLayer;
     cursorLayer: CursorLayer;
     snapBadge: PIXI.Graphics;
     snap: SnapIndex;
@@ -99,8 +110,12 @@ export function Canvas({
       const placedLayer = new PlacedItemsLayer(viewport);
       const shapesLayer = new ShapesLayer(viewport);
       const measureLayer = new MeasurementLayer(viewport);
+      const framesLayer = new FramesLayer(viewport);
       const cursorLayer = new CursorLayer(viewport);
+      // Frame backdrops sit between the grid and the drawings so anything
+      // placed on the canvas renders inside the frame visually.
       viewport.world.addChild(gridLayer);
+      viewport.world.addChild(framesLayer);
       viewport.world.addChild(drawingLayer);
       viewport.world.addChild(drawingSelLayer);
       viewport.world.addChild(placedLayer);
@@ -121,6 +136,7 @@ export function Canvas({
         placedLayer,
         shapesLayer,
         measureLayer,
+        framesLayer,
         cursorLayer,
         snapBadge,
         snap: new SnapIndex(),
@@ -225,6 +241,18 @@ export function Canvas({
         );
       }
       if (
+        state.frames !== prev.frames ||
+        state.selection !== prev.selection ||
+        state.layers.frames !== prev.layers.frames ||
+        state.view !== prev.view
+      ) {
+        a.framesLayer.visible = state.layers.frames;
+        a.framesLayer.render(
+          Object.values(state.frames),
+          state.selection?.kind === "frame" ? state.selection.id : null,
+        );
+      }
+      if (
         state.drawings !== prev.drawings ||
         state.selection !== prev.selection
       ) {
@@ -266,11 +294,13 @@ export function Canvas({
       }
       if (state.draft !== prev.draft) {
         const d = state.draft;
-        if (d && (d.tool === "line" || d.tool === "rect")) {
-          a.shapesLayer.drawDraft(d.tool, d.start, d.end);
+        if (d && (d.tool === "line" || d.tool === "rect" || d.tool === "frame")) {
+          // Reuse the rect ghost for frame drafts — they're both rectangles
+          // and the dashed outline reads as "you're dragging out a region".
+          a.shapesLayer.drawDraft(d.tool === "frame" ? "rect" : d.tool, d.start, d.end);
         } else if (
-          (prev.draft && (prev.draft.tool === "line" || prev.draft.tool === "rect")) &&
-          (!d || (d.tool !== "line" && d.tool !== "rect"))
+          (prev.draft && (prev.draft.tool === "line" || prev.draft.tool === "rect" || prev.draft.tool === "frame")) &&
+          (!d || (d.tool !== "line" && d.tool !== "rect" && d.tool !== "frame"))
         ) {
           a.shapesLayer.drawDraft(null, null, null);
         }
@@ -369,6 +399,19 @@ export function Canvas({
           startDy: number;
         }
       | null = null;
+    let frameDrag:
+      | {
+          id: string;
+          mode: "move" | "tl" | "tr" | "bl" | "br";
+          startWorld: { x: number; y: number };
+          start: { x: number; y: number; w: number; h: number };
+        }
+      | null = null;
+    let frameDraft:
+      | {
+          startWorld: { x: number; y: number };
+        }
+      | null = null;
     const PAN_TOOLS = new Set(["pan"]);
 
     const SNAP_PX = 8;
@@ -415,6 +458,18 @@ export function Canvas({
         e.button === 1 ||
         (e.pointerType === "mouse" && e.shiftKey) ||
         PAN_TOOLS.has(tool);
+
+      // Frame tool: click-drag-release to draw a new frame rectangle.
+      if (!isPan && tool === "frame" && e.button === 0) {
+        const world = a!.viewport.screenToWorld(sx, sy);
+        frameDraft = { startWorld: world };
+        useEditor
+          .getState()
+          .setDraft({ tool: "frame", start: world, end: world });
+        canvas.setPointerCapture(e.pointerId);
+        setDraggingClass(true);
+        return;
+      }
 
       // If select tool + a placed item is selected, check for handle/item drag.
       if (!isPan && tool === "select" && e.button === 0) {
@@ -530,6 +585,33 @@ export function Canvas({
           }
         }
 
+        // Frame: corner-handle resize for the currently-selected frame, then
+        // body click for any frame. Frames sit BEHIND drawings/items so a
+        // body click loses to those when overlapping — exactly what we want
+        // for "the frame is just a backdrop".
+        if (state.selection?.kind === "frame") {
+          const sel = state.frames[state.selection.id];
+          if (sel && !sel.locked) {
+            const handle = a!.framesLayer.hitHandle(world.x, world.y);
+            if (handle && handle.id === sel.id) {
+              frameDrag = {
+                id: sel.id,
+                mode: handle.corner,
+                startWorld: world,
+                start: {
+                  x: Number(sel.x),
+                  y: Number(sel.y),
+                  w: Number(sel.w),
+                  h: Number(sel.h),
+                },
+              };
+              canvas.setPointerCapture(e.pointerId);
+              setDraggingClass(true);
+              return;
+            }
+          }
+        }
+
         // Plain click on a drawing layer.
         const drawingHit = a!.drawingSelLayer.hitTest(
           Object.values(state.drawings),
@@ -549,6 +631,28 @@ export function Canvas({
               ty: drawing.ty || 0,
               scale: drawing.scale || 1,
               rotation: drawing.rotation || 0,
+            },
+          };
+          canvas.setPointerCapture(e.pointerId);
+          setDraggingClass(true);
+          return;
+        }
+
+        // Frame body click — last fallback so other elements take priority.
+        const frameHit = a!.framesLayer.hitFrame(world.x, world.y);
+        if (frameHit) {
+          const frame = state.frames[frameHit];
+          onSelectionPick?.({ kind: "frame", id: frameHit });
+          if (!frame || frame.locked) return;
+          frameDrag = {
+            id: frameHit,
+            mode: "move",
+            startWorld: world,
+            start: {
+              x: Number(frame.x),
+              y: Number(frame.y),
+              w: Number(frame.w),
+              h: Number(frame.h),
             },
           };
           canvas.setPointerCapture(e.pointerId);
@@ -580,6 +684,59 @@ export function Canvas({
           labelDrag.startDx + dx,
           labelDrag.startDy + dy,
         );
+        return;
+      }
+
+      if (frameDraft) {
+        const world = a!.viewport.screenToWorld(sx, sy);
+        useEditor.getState().setDraft({
+          tool: "frame",
+          start: frameDraft.startWorld,
+          end: world,
+        });
+        return;
+      }
+
+      if (frameDrag) {
+        const world = a!.viewport.screenToWorld(sx, sy);
+        const dx = world.x - frameDrag.startWorld.x;
+        const dy = world.y - frameDrag.startWorld.y;
+        if (frameDrag.mode === "move") {
+          onFrameUpdate?.(frameDrag.id, {
+            x: frameDrag.start.x + dx,
+            y: frameDrag.start.y + dy,
+          });
+        } else {
+          // Corner resize: keep the opposite corner anchored.
+          let { x, y, w, h } = frameDrag.start;
+          if (frameDrag.mode === "tl") {
+            x = frameDrag.start.x + dx;
+            y = frameDrag.start.y + dy;
+            w = frameDrag.start.w - dx;
+            h = frameDrag.start.h - dy;
+          } else if (frameDrag.mode === "tr") {
+            y = frameDrag.start.y + dy;
+            w = frameDrag.start.w + dx;
+            h = frameDrag.start.h - dy;
+          } else if (frameDrag.mode === "bl") {
+            x = frameDrag.start.x + dx;
+            w = frameDrag.start.w - dx;
+            h = frameDrag.start.h + dy;
+          } else {
+            w = frameDrag.start.w + dx;
+            h = frameDrag.start.h + dy;
+          }
+          // Flip when dragging past the opposite corner.
+          if (w < 0) {
+            x += w;
+            w = -w;
+          }
+          if (h < 0) {
+            y += h;
+            h = -h;
+          }
+          onFrameUpdate?.(frameDrag.id, { x, y, w, h });
+        }
         return;
       }
 
@@ -695,6 +852,11 @@ export function Canvas({
       } else {
         showSnapBadge(null);
       }
+      // Hover affordance for the draggable measurement label.
+      if (tool === "select") {
+        const overLabel = a!.measureLayer.hitLabel(world.x, world.y);
+        canvas.style.cursor = overLabel ? "grab" : "";
+      }
       onPointerWorld?.(snapped);
     });
 
@@ -706,13 +868,33 @@ export function Canvas({
       const wasItemDrag = itemDrag;
       const wasDrawingDrag = drawingDrag;
       const wasLabelDrag = labelDrag;
+      const wasFrameDrag = frameDrag;
+      const wasFrameDraft = frameDraft;
       dragging = false;
       itemDrag = null;
       drawingDrag = null;
       labelDrag = null;
+      frameDrag = null;
+      frameDraft = null;
       setDraggingClass(false);
       try { canvas.releasePointerCapture(e.pointerId); } catch {}
 
+      if (wasFrameDraft) {
+        // Commit the dragged-out frame rect. Discard zero-size drags so a
+        // mis-click doesn't stamp a 0×0 frame on the page.
+        const world = a!.viewport.screenToWorld(sx, sy);
+        const x = Math.min(wasFrameDraft.startWorld.x, world.x);
+        const y = Math.min(wasFrameDraft.startWorld.y, world.y);
+        const w = Math.abs(world.x - wasFrameDraft.startWorld.x);
+        const h = Math.abs(world.y - wasFrameDraft.startWorld.y);
+        useEditor.getState().setDraft(null);
+        if (w > 0.5 && h > 0.5) onFrameCreate?.({ x, y, w, h });
+        return;
+      }
+      if (wasFrameDrag) {
+        onFrameUpdateEnd?.(wasFrameDrag.id);
+        return;
+      }
       if (wasLabelDrag) {
         onMeasurementLabelMoveEnd?.(wasLabelDrag.id);
         return;
@@ -848,6 +1030,7 @@ function cursorForTool(tool: string): string {
     case "calibrate":
     case "line":
     case "rect":
+    case "frame":
       return "cursor-crosshair";
     case "note":
     case "text":

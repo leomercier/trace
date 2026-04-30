@@ -8,6 +8,7 @@ import { Inspector } from "@/components/panels/Inspector";
 import { CalibrateDialog } from "@/components/panels/CalibrateDialog";
 import { useEditor, type Tool } from "@/stores/editorStore";
 import type {
+  Frame,
   InventoryItem,
   Measurement,
   Note,
@@ -40,6 +41,7 @@ interface InitialData {
   notes: Note[];
   placedItems: PlacedItem[];
   shapes: Shape[];
+  frames?: Frame[];
   role: "owner" | "admin" | "editor" | "viewer";
   user: { id: string; name: string; email: string; avatar: string | null };
   orgId: string;
@@ -266,6 +268,7 @@ export function Editor({ initial }: { initial: InitialData }) {
       notes: initial.notes,
       placedItems: initial.placedItems,
       shapes: initial.shapes,
+      frames: initial.frames || [],
       scale:
         initial.page.scale_real_per_unit
           ? {
@@ -463,6 +466,8 @@ export function Editor({ initial }: { initial: InitialData }) {
         l: "line",
         r: "rect",
         c: "calibrate",
+        // 'f' is already bound to fit-to-content; the Frame tool is
+        // entered from the Toolbar button instead.
       };
       const t = map[e.key.toLowerCase()];
       if (t) useEditor.getState().setTool(t);
@@ -477,6 +482,7 @@ export function Editor({ initial }: { initial: InitialData }) {
           if (sel.kind === "note") deleteNote(sel.id);
           if (sel.kind === "placed") deletePlacedItem(sel.id);
           if (sel.kind === "shape") deleteShape(sel.id);
+          if (sel.kind === "frame") deleteFrame(sel.id);
           useEditor.getState().setSelection(null);
         }
       }
@@ -682,9 +688,101 @@ export function Editor({ initial }: { initial: InitialData }) {
     await supabase.from("shapes").delete().eq("id", id);
   }
 
+  async function createFrame(rect: { x: number; y: number; w: number; h: number }) {
+    const id = crypto.randomUUID();
+    const existing = Object.values(useEditor.getState().frames);
+    const nextN = existing.length + 1;
+    const optimistic: Frame = {
+      id,
+      page_id: initial.page.id,
+      name: `Canvas ${nextN}`,
+      x: rect.x as any,
+      y: rect.y as any,
+      w: rect.w as any,
+      h: rect.h as any,
+      background: "#ffffff",
+      z_order: 0,
+      locked: false,
+      created_by: initial.user.id,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    useEditor.getState().upsertFrame(optimistic);
+    useEditor.getState().setSelection({ kind: "frame", id });
+    useEditor.getState().setTool("select");
+    const { data, error } = await supabase
+      .from("frames")
+      .insert({
+        id,
+        page_id: initial.page.id,
+        name: optimistic.name,
+        x: optimistic.x,
+        y: optimistic.y,
+        w: optimistic.w,
+        h: optimistic.h,
+        background: optimistic.background,
+      })
+      .select("*")
+      .single();
+    if (error) {
+      console.error("[trace] failed to create frame:", error);
+      useEditor.getState().removeFrame(id);
+      alert(
+        `Couldn't save the canvas: ${error.message}\n\n` +
+          `Have you applied the 0011_frames.sql migration?`,
+      );
+      return;
+    }
+    if (data) useEditor.getState().upsertFrame(data as any);
+  }
+
+  async function updateFrame(id: string, patch: Partial<Frame>) {
+    const cur = useEditor.getState().frames[id];
+    if (!cur) return;
+    useEditor.getState().upsertFrame({ ...cur, ...patch } as Frame);
+    if (id.startsWith("tmp-")) return;
+    await supabase.from("frames").update(patch as any).eq("id", id);
+  }
+
+  async function deleteFrame(id: string) {
+    useEditor.getState().removeFrame(id);
+    if (id.startsWith("tmp-")) return;
+    await supabase.from("frames").delete().eq("id", id);
+  }
+
+  // While the user is dragging a frame on the canvas we update the store
+  // optimistically every frame; the DB upsert only fires on pointerup.
+  function onFrameDrag(
+    id: string,
+    patch: Partial<{ x: number; y: number; w: number; h: number }>,
+  ) {
+    const cur = useEditor.getState().frames[id];
+    if (!cur) return;
+    useEditor.getState().upsertFrame({ ...cur, ...patch } as Frame);
+  }
+  async function onFrameDragEnd(id: string) {
+    const cur = useEditor.getState().frames[id];
+    if (!cur || id.startsWith("tmp-")) return;
+    await supabase
+      .from("frames")
+      .update({ x: cur.x, y: cur.y, w: cur.w, h: cur.h })
+      .eq("id", id);
+  }
+
   async function createMeasurement(a: { x: number; y: number }, b: { x: number; y: number }) {
     const s = useEditor.getState();
     const id = crypto.randomUUID();
+    // Default the label slightly perpendicular to the line so the dotted
+    // leader is visible from the moment the measurement is drawn — that's
+    // the visual cue that tells users the label can be pulled away.
+    const dxLine = b.x - a.x;
+    const dyLine = b.y - a.y;
+    const lineLen = Math.hypot(dxLine, dyLine) || 1;
+    const offsetMag = Math.max(20, lineLen * 0.18);
+    // Perpendicular vector (rotated 90° CCW so the label sits "above" most
+    // horizontal lines drawn left-to-right).
+    const ndx = (-dyLine / lineLen) * offsetMag;
+    const ndy = (dxLine / lineLen) * offsetMag;
     const optimistic: Measurement = {
       id,
       page_id: initial.page.id,
@@ -693,8 +791,8 @@ export function Editor({ initial }: { initial: InitialData }) {
       bx: b.x as any,
       by: b.y as any,
       label: null,
-      label_dx: 0 as any,
-      label_dy: 0 as any,
+      label_dx: ndx as any,
+      label_dy: ndy as any,
       created_by: initial.user.id,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -709,6 +807,8 @@ export function Editor({ initial }: { initial: InitialData }) {
         ay: a.y,
         bx: b.x,
         by: b.y,
+        label_dx: ndx,
+        label_dy: ndy,
       })
       .select("*")
       .single();
@@ -815,7 +915,7 @@ export function Editor({ initial }: { initial: InitialData }) {
   }
 
   function onSelectionPick(
-    sel: { kind: "measurement" | "placed" | "shape" | "drawing"; id: string } | null,
+    sel: { kind: "measurement" | "placed" | "shape" | "drawing" | "frame"; id: string } | null,
   ) {
     useEditor.getState().setSelection(sel);
   }
@@ -992,12 +1092,10 @@ export function Editor({ initial }: { initial: InitialData }) {
       try {
         const { pdfToPngFiles } = await import("./parsers/pdf");
         const pages = await pdfToPngFiles(file, file.name);
-        let cursorX = 0;
-        const gap = 50;
         for (let i = 0; i < pages.length; i++) {
-          const { file: pageFile, w } = pages[i];
-          await uploadOneFile(pageFile, { tx: cursorX });
-          cursorX += w + gap;
+          // Each subsequent uploadOneFile reads the live world bounds, so
+          // pages chain past each other automatically.
+          await uploadOneFile(pages[i].file);
         }
       } catch (err) {
         console.error("[trace] failed to split PDF", err);
@@ -1010,6 +1108,19 @@ export function Editor({ initial }: { initial: InitialData }) {
 
     await uploadOneFile(file);
     setUploadStatus(null);
+  }
+
+  // Default placement for a new asset: just past the right edge of every
+  // existing drawing so back-to-back uploads land in a row instead of all
+  // stacking at the origin. Returns 0 when the page is empty so the first
+  // drawing renders at its natural coordinates. The first asset on the
+  // page (the legacy "primary" slot) is always placed at 0,0 because the
+  // pages row doesn't carry transform fields.
+  function nextPlacementTx(): number {
+    const b = useEditor.getState().bounds;
+    if (!b || !Number.isFinite(b.maxX)) return 0;
+    const GAP = 50;
+    return b.maxX + GAP;
   }
 
   // Uploads a single file as a drawing on the current page. The first file
@@ -1115,6 +1226,8 @@ export function Editor({ initial }: { initial: InitialData }) {
           0,
           ...Object.values(useEditor.getState().drawings).map((d) => d.sortOrder),
         ) + 1;
+      const tx = opts?.tx ?? nextPlacementTx();
+      const ty = opts?.ty ?? 0;
       await supabase.from("page_drawings").insert({
         id: layerId,
         page_id: initial.page.id,
@@ -1123,8 +1236,8 @@ export function Editor({ initial }: { initial: InitialData }) {
         file_name: fileName,
         file_size: blob.size,
         sort_order: existingMax,
-        x: opts?.tx ?? 0,
-        y: opts?.ty ?? 0,
+        x: tx,
+        y: ty,
       });
       const { data: signed } = await supabase.storage
         .from("drawings")
@@ -1137,8 +1250,8 @@ export function Editor({ initial }: { initial: InitialData }) {
           name: fileName,
           sortOrder: existingMax,
           visible: true,
-          tx: opts?.tx,
-          ty: opts?.ty,
+          tx,
+          ty,
         });
       }
     }
@@ -1208,18 +1321,15 @@ export function Editor({ initial }: { initial: InitialData }) {
 
   // Reorder placed items by rewriting their z_order based on the dropped
   // sequence (top of list = highest z_order). Items panel sorts descending
-  // so we map index 0 to the largest z.
+  // so we map index 0 to the largest z. Uses a single batch update so the
+  // store fires one render rather than N — the panel was flickering when
+  // every reorder triggered a per-item upsert in a loop.
   async function reorderPlacedItems(orderedIds: string[]) {
     const total = orderedIds.length;
     const updates = orderedIds.map((id, i) => ({ id, z: total - i }));
-    for (const u of updates) {
-      const cur = useEditor.getState().placedItems[u.id];
-      if (cur) {
-        useEditor
-          .getState()
-          .upsertPlacedItem({ ...cur, z_order: u.z as any });
-      }
-    }
+    useEditor.getState().patchPlacedItems(
+      updates.map((u) => ({ id: u.id, patch: { z_order: u.z as any } })),
+    );
     await Promise.all(
       updates
         .filter((u) => !u.id.startsWith("tmp-"))
@@ -1235,12 +1345,9 @@ export function Editor({ initial }: { initial: InitialData }) {
   async function reorderShapes(orderedIds: string[]) {
     const total = orderedIds.length;
     const updates = orderedIds.map((id, i) => ({ id, z: total - i }));
-    for (const u of updates) {
-      const cur = useEditor.getState().shapes[u.id];
-      if (cur) {
-        useEditor.getState().upsertShape({ ...cur, z_order: u.z as any });
-      }
-    }
+    useEditor.getState().patchShapes(
+      updates.map((u) => ({ id: u.id, patch: { z_order: u.z as any } })),
+    );
     await Promise.all(
       updates
         .filter((u) => !u.id.startsWith("tmp-"))
@@ -1294,6 +1401,108 @@ export function Editor({ initial }: { initial: InitialData }) {
     track(EVENTS.exportPng);
   }
 
+  // Compute the world-space bounding box of the current selection. Returns
+  // null if nothing is selected or the selection has no measurable bounds.
+  function selectionBounds(): { minX: number; minY: number; maxX: number; maxY: number; name: string } | null {
+    const s = useEditor.getState();
+    const sel = s.selection;
+    if (!sel) return null;
+    if (sel.kind === "frame") {
+      const f = s.frames[sel.id];
+      if (!f) return null;
+      return { minX: +f.x, minY: +f.y, maxX: +f.x + +f.w, maxY: +f.y + +f.h, name: f.name };
+    }
+    if (sel.kind === "shape") {
+      const sh = s.shapes[sel.id];
+      if (!sh) return null;
+      const x = +sh.x;
+      const y = +sh.y;
+      const w = +sh.w;
+      const h = +sh.h;
+      return {
+        minX: Math.min(x, x + w),
+        minY: Math.min(y, y + h),
+        maxX: Math.max(x, x + w),
+        maxY: Math.max(y, y + h),
+        name: sh.kind,
+      };
+    }
+    if (sel.kind === "drawing") {
+      const d = s.drawings[sel.id];
+      if (!d) return null;
+      // Use the world-space bounds via the same centre-pivot transform the
+      // store uses for compositing. Simple axis-aligned approximation
+      // (good enough for export framing).
+      const cx = (d.bounds.minX + d.bounds.maxX) / 2;
+      const cy = (d.bounds.minY + d.bounds.maxY) / 2;
+      const halfW = ((d.bounds.maxX - d.bounds.minX) / 2) * d.scale;
+      const halfH = ((d.bounds.maxY - d.bounds.minY) / 2) * d.scale;
+      return {
+        minX: cx + d.tx - halfW,
+        minY: cy + d.ty - halfH,
+        maxX: cx + d.tx + halfW,
+        maxY: cy + d.ty + halfH,
+        name: d.name || "drawing",
+      };
+    }
+    if (sel.kind === "placed") {
+      const p = s.placedItems[sel.id];
+      if (!p) return null;
+      const realPerUnit = s.scale?.realPerUnit ?? 1;
+      const w = (p.width_mm * (Number(p.scale_w) || 1)) / realPerUnit;
+      const h = (p.depth_mm * (Number(p.scale_d) || 1)) / realPerUnit;
+      return {
+        minX: +p.x - w / 2,
+        minY: +p.y - h / 2,
+        maxX: +p.x + w / 2,
+        maxY: +p.y + h / 2,
+        name: p.name,
+      };
+    }
+    return null;
+  }
+
+  // Export only the bounds of the current selection. Renders the live Pixi
+  // app once with everything visible, then crops the resulting bitmap to
+  // the selection's screen rect. This keeps the export pipeline simple
+  // (no separate offscreen render) while letting users save a tightly
+  // framed PNG of any frame / drawing / shape / item.
+  async function exportSelectionPng() {
+    const sb = selectionBounds();
+    if (!sb) {
+      // Fall back to the regular export when nothing fits.
+      await exportPng();
+      return;
+    }
+    const cv = document.querySelector(".pixi-host canvas") as HTMLCanvasElement | null;
+    if (!cv) return;
+    const view = useEditor.getState().view;
+    const z = view.zoom || 1;
+    // World → canvas-pixel transform.
+    const dpr = cv.width / cv.clientWidth;
+    const sxMin = (sb.minX * z + view.x) * dpr;
+    const syMin = (sb.minY * z + view.y) * dpr;
+    const sxMax = (sb.maxX * z + view.x) * dpr;
+    const syMax = (sb.maxY * z + view.y) * dpr;
+    const cropX = Math.max(0, Math.floor(Math.min(sxMin, sxMax)));
+    const cropY = Math.max(0, Math.floor(Math.min(syMin, syMax)));
+    const cropW = Math.max(1, Math.floor(Math.abs(sxMax - sxMin)));
+    const cropH = Math.max(1, Math.floor(Math.abs(syMax - syMin)));
+    const cropped = document.createElement("canvas");
+    cropped.width = cropW;
+    cropped.height = cropH;
+    const ctx = cropped.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(cv, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+    const url = cropped.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = url;
+    const safe = sb.name.replace(/[^a-z0-9-_ ]/gi, "_").trim() || "selection";
+    a.download = `${initial.page.name} - ${safe}.png`;
+    a.click();
+    track(EVENTS.exportPng);
+  }
+
   async function renamePage(name: string) {
     await supabase.from("pages").update({ name }).eq("id", initial.page.id);
   }
@@ -1337,6 +1546,7 @@ export function Editor({ initial }: { initial: InitialData }) {
         onDeletePlacedItem={deletePlacedItem}
         onDeleteShape={deleteShape}
         onDeleteNote={deleteNote}
+        onDeleteFrame={deleteFrame}
         onReorderDrawings={reorderDrawings}
         onReorderPlacedItems={reorderPlacedItems}
         onReorderShapes={reorderShapes}
@@ -1364,6 +1574,9 @@ export function Editor({ initial }: { initial: InitialData }) {
           onItemMoveEnd={onItemMoveEnd}
           onDrawingTransform={onDrawingDrag}
           onDrawingTransformEnd={onDrawingDragEnd}
+          onFrameCreate={createFrame}
+          onFrameUpdate={onFrameDrag}
+          onFrameUpdateEnd={onFrameDragEnd}
           onMeasurementLabelMove={(id, dx, dy) => {
             const m = useEditor.getState().measurements[id];
             if (!m) return;
@@ -1551,13 +1764,17 @@ export function Editor({ initial }: { initial: InitialData }) {
         onChangePlacedItemZ={changePlacedItemZ}
         onUpdateShape={updateShape}
         onUpdateDrawing={updateDrawingTransform}
+        onUpdateFrame={updateFrame}
+        onDeleteFrame={deleteFrame}
         onDeleteShape={deleteShape}
         onExportPng={exportPng}
+        onExportSelection={exportSelectionPng}
         onDeleteSelection={() => {
           const sel = useEditor.getState().selection;
           if (sel?.kind === "measurement") deleteMeasurement(sel.id);
           if (sel?.kind === "note") deleteNote(sel.id);
           if (sel?.kind === "placed") deletePlacedItem(sel.id);
+          if (sel?.kind === "frame") deleteFrame(sel.id);
           useEditor.getState().setSelection(null);
         }}
         scaleControls={

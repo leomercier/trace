@@ -29,11 +29,25 @@ export async function GET(
       .eq("id", share.page_id!)
       .single();
     if (!page) return NextResponse.json({ error: "missing" }, { status: 404 });
-    const [{ data: measurements }, { data: notes }, { data: placedItems }] = await Promise.all([
+    const [
+      { data: measurements },
+      { data: notes },
+      { data: placedItems },
+      framesRes,
+    ] = await Promise.all([
       svc.from("measurements").select("*").eq("page_id", page.id),
       svc.from("notes").select("*").eq("page_id", page.id),
       svc.from("placed_items").select("*").eq("page_id", page.id),
+      svc
+        .from("frames")
+        .select("*")
+        .eq("page_id", page.id)
+        .then(
+          (res) => res,
+          () => ({ data: [] as any[] }),
+        ),
     ]);
+    const frames = (framesRes as any)?.data ?? [];
     let signedUrl: string | null = null;
     if (page.source_storage_path) {
       const { data } = await svc.storage
@@ -47,6 +61,7 @@ export async function GET(
       measurements: measurements || [],
       notes: notes || [],
       placedItems: placedItems || [],
+      frames: frames || [],
       signedUrl,
       allow_comments: share.allow_comments,
     });

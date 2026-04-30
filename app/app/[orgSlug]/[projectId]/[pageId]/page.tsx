@@ -79,6 +79,7 @@ export default async function EditorPage({
     { data: pages },
     { data: pageDrawings },
     { data: shapes },
+    framesRes,
   ] = await Promise.all([
     supabase.from("projects").select("name").eq("id", params.projectId).maybeSingle(),
     supabase.from("measurements").select("*").eq("page_id", page.id),
@@ -105,7 +106,19 @@ export default async function EditorPage({
       .select("*")
       .eq("page_id", page.id)
       .order("z_order", { ascending: true }),
+    // The frames table was added in 0011; tolerate it being absent on
+    // databases that haven't migrated yet so the editor still loads.
+    supabase
+      .from("frames")
+      .select("*")
+      .eq("page_id", page.id)
+      .order("z_order", { ascending: true })
+      .then(
+        (res) => res,
+        () => ({ data: [] as any[] }),
+      ),
   ]);
+  const frames = (framesRes as any)?.data ?? [];
 
   let signedUrl: string | null = null;
   if (page.source_storage_path) {
@@ -129,6 +142,7 @@ export default async function EditorPage({
         notes: (notes || []) as any,
         placedItems: (placedItems || []) as any,
         shapes: (shapes || []) as any,
+        frames: (frames || []) as any,
         role: mem.role as any,
         user: {
           id: u.user!.id,

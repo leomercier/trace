@@ -64,6 +64,13 @@ const TOOLS: {
     icon: "rect",
     key: "R",
   },
+  {
+    id: "frame",
+    label: "Canvas",
+    hint: "Click and drag to add a canvas region. Select it and use Export to save just this area.",
+    icon: "crop",
+    key: "",
+  },
 ];
 
 // Tools surfaced in the overflow menu (chevron on the right of the toolbar)

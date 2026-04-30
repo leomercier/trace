@@ -145,6 +145,23 @@ export interface Shape {
   updated_at: string;
 }
 
+/** Canvas / frame: a bounded rectangle on the page used as an artboard. */
+export interface Frame {
+  id: string;
+  page_id: string;
+  name: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  background: string | null;
+  z_order: number;
+  locked: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PageDrawing {
   id: string;
   page_id: string;

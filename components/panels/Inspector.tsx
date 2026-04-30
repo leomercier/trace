@@ -3,7 +3,7 @@
 import { useEditor } from "@/stores/editorStore";
 import { formatLength, type Unit } from "@/lib/utils/units";
 import { useState } from "react";
-import type { Measurement, PlacedItem, Shape, ShapeStyle } from "@/lib/supabase/types";
+import type { Frame, Measurement, PlacedItem, Shape, ShapeStyle } from "@/lib/supabase/types";
 import {
   Trash2,
   RotateCw,
@@ -29,7 +29,10 @@ export function Inspector({
   onUpdateShape,
   onDeleteShape,
   onUpdateDrawing,
+  onUpdateFrame,
+  onDeleteFrame,
   onExportPng,
+  onExportSelection,
   scaleControls,
   headerActions,
   mobileOpen,
@@ -48,7 +51,11 @@ export function Inspector({
     id: string,
     patch: Partial<{ tx: number; ty: number; scale: number; rotation: number; locked: boolean }>,
   ) => void;
+  onUpdateFrame?: (id: string, patch: Partial<Frame>) => void;
+  onDeleteFrame?: (id: string) => void;
   onExportPng: () => void;
+  /** Export only the bounds of the current selection (frame or shape). */
+  onExportSelection?: () => void;
   scaleControls: React.ReactNode;
   headerActions?: React.ReactNode;
   mobileOpen?: boolean;
@@ -80,6 +87,8 @@ export function Inspector({
   const shapeSel = selection?.kind === "shape" ? shapes[selection.id] : null;
   const drawings = useEditor((s) => s.drawings);
   const drawingSel = selection?.kind === "drawing" ? drawings[selection.id] : null;
+  const frames = useEditor((s) => s.frames);
+  const frameSel = selection?.kind === "frame" ? frames[selection.id] : null;
 
   const asideClass = mobileOpen
     ? "fixed right-0 top-0 z-40 flex h-full w-80 max-w-[85vw] flex-col overflow-y-auto border-l border-border bg-panel shadow-lg md:relative md:w-80 md:max-w-none md:shadow-none"
@@ -128,7 +137,7 @@ export function Inspector({
       <div className="border-b border-border p-4">
         <div className="text-xs uppercase tracking-wider text-ink-faint">Layers</div>
         <div className="mt-2 space-y-2">
-          {(["measurements", "notes", "items", "shapes", "cursors"] as const).map((k) => (
+          {(["measurements", "notes", "items", "shapes", "frames", "cursors"] as const).map((k) => (
             <label key={k} className="flex cursor-pointer items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -247,6 +256,35 @@ export function Inspector({
         </div>
       ) : null}
 
+      {frameSel ? (
+        <div className="border-b border-border p-4">
+          <div className="flex items-center justify-between">
+            <div className="text-xs uppercase tracking-wider text-ink-faint">Canvas</div>
+            {canEdit && onUpdateFrame ? (
+              <button
+                onClick={() => onUpdateFrame(frameSel.id, { locked: !frameSel.locked })}
+                title={frameSel.locked ? "Unlock" : "Lock"}
+                className={`flex h-7 items-center gap-1 rounded border px-2 text-xs ${
+                  frameSel.locked
+                    ? "border-ink bg-ink text-white"
+                    : "border-border bg-panel-muted text-ink-muted hover:text-ink"
+                }`}
+              >
+                {frameSel.locked ? <Lock size={11} /> : <Unlock size={11} />}
+                {frameSel.locked ? "Locked" : "Lock"}
+              </button>
+            ) : null}
+          </div>
+          <FrameProperties
+            frame={frameSel}
+            canEdit={canEdit && !frameSel.locked}
+            onUpdate={(patch) => onUpdateFrame?.(frameSel.id, patch)}
+            onDelete={() => onDeleteFrame?.(frameSel.id)}
+            onExport={onExportSelection}
+          />
+        </div>
+      ) : null}
+
       {shapeSel ? (
         <div className="border-b border-border p-4">
           <div className="text-xs uppercase tracking-wider text-ink-faint">Shape</div>
@@ -353,11 +391,19 @@ export function Inspector({
 
       <div className="mt-auto border-t border-border p-4">
         <div className="text-xs uppercase tracking-wider text-ink-faint">Export</div>
+        {onExportSelection && selection ? (
+          <button
+            onClick={onExportSelection}
+            className="mt-2 flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-ink bg-ink text-sm text-white hover:bg-black/90"
+          >
+            <Download size={14} /> Export selection
+          </button>
+        ) : null}
         <button
           onClick={onExportPng}
           className="mt-2 flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-border bg-panel-muted text-sm hover:bg-panel"
         >
-          <Download size={14} /> Export as PNG
+          <Download size={14} /> Export {selection ? "whole page" : "as PNG"}
         </button>
       </div>
     </aside>
@@ -999,6 +1045,86 @@ function ShapeProperties({
           className="text-xs text-measure underline underline-offset-4 hover:no-underline"
         >
           Delete shape
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function FrameProperties({
+  frame,
+  canEdit,
+  onUpdate,
+  onDelete,
+  onExport,
+}: {
+  frame: Frame;
+  canEdit: boolean;
+  onUpdate: (patch: Partial<Frame>) => void;
+  onDelete: () => void;
+  onExport?: () => void;
+}) {
+  const [name, setName] = useState(frame.name);
+  return (
+    <div className="mt-3 space-y-3">
+      <div>
+        <div className="mb-1 text-[10px] uppercase tracking-wider text-ink-faint">Name</div>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={() => {
+            if (name !== frame.name) onUpdate({ name: name.trim() || "Canvas" });
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+          }}
+          disabled={!canEdit}
+          placeholder="Canvas"
+          className="w-full rounded-md border border-border bg-panel-muted px-2 py-1.5 text-sm outline-none focus:border-ink"
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <NumField
+          label="X"
+          value={Number(frame.x)}
+          onCommit={(v) => onUpdate({ x: v as any })}
+          disabled={!canEdit}
+        />
+        <NumField
+          label="Y"
+          value={Number(frame.y)}
+          onCommit={(v) => onUpdate({ y: v as any })}
+          disabled={!canEdit}
+        />
+        <NumField
+          label="W"
+          value={Number(frame.w)}
+          min={1}
+          onCommit={(v) => onUpdate({ w: v as any })}
+          disabled={!canEdit}
+        />
+        <NumField
+          label="H"
+          value={Number(frame.h)}
+          min={1}
+          onCommit={(v) => onUpdate({ h: v as any })}
+          disabled={!canEdit}
+        />
+      </div>
+      {onExport ? (
+        <button
+          onClick={onExport}
+          className="flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-ink bg-ink text-sm text-white hover:bg-black/90"
+        >
+          <Download size={14} /> Export this canvas
+        </button>
+      ) : null}
+      {canEdit ? (
+        <button
+          onClick={onDelete}
+          className="text-xs text-measure underline underline-offset-4 hover:no-underline"
+        >
+          Delete canvas
         </button>
       ) : null}
     </div>
