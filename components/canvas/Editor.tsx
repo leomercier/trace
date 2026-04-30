@@ -975,6 +975,53 @@ export function Editor({ initial }: { initial: InitialData }) {
   }
 
   async function onUploadFile(file: File) {
+    const detectedTop = inferFileType(file.name);
+    if (detectedTop === "other") {
+      alert(
+        `Couldn't add "${file.name}". tracable supports DWG, DXF, PDF, SVG, PNG, JPG, GIF, WEBP, BMP.`,
+      );
+      return;
+    }
+
+    // Multi-page PDFs: split into one PNG per page, then upload each as its
+    // own drawing layer with a horizontal offset so pages don't stack on
+    // top of each other. Each page becomes an independent asset users can
+    // hide, lock, transform, and stack.
+    if (detectedTop === "pdf") {
+      setUploadStatus({ name: file.name, phase: "processing" });
+      try {
+        const { pdfToPngFiles } = await import("./parsers/pdf");
+        const pages = await pdfToPngFiles(file, file.name);
+        let cursorX = 0;
+        const gap = 50;
+        for (let i = 0; i < pages.length; i++) {
+          const { file: pageFile, w } = pages[i];
+          await uploadOneFile(pageFile, { tx: cursorX });
+          cursorX += w + gap;
+        }
+      } catch (err) {
+        console.error("[trace] failed to split PDF", err);
+        alert("Couldn't read this PDF. Try re-exporting it from your source app.");
+      } finally {
+        setUploadStatus(null);
+      }
+      return;
+    }
+
+    await uploadOneFile(file);
+    setUploadStatus(null);
+  }
+
+  // Uploads a single file as a drawing on the current page. The first file
+  // ever added becomes the legacy "primary" (persisted on the pages row);
+  // every subsequent file is appended as an additional `page_drawings` row.
+  // Critically, the primary check is against the LIVE store — not the
+  // initial server props — so back-to-back uploads correctly stack instead
+  // of overwriting each other.
+  async function uploadOneFile(
+    file: File,
+    opts?: { tx?: number; ty?: number },
+  ) {
     let blob: Blob = file;
     let fileName = file.name;
     let detected = inferFileType(file.name);
@@ -1019,11 +1066,12 @@ export function Editor({ initial }: { initial: InitialData }) {
     setUploadStatus({ name: fileName, phase: "uploading" });
 
     const layerId = crypto.randomUUID();
-    // If the page already has a primary, every new file becomes an
-    // additional layer (page_drawings row). If the page is empty, this
-    // becomes the primary so the existing single-source flow keeps
-    // working too.
-    const isPrimary = !initial.signedUrl && (initial.pageDrawings?.length ?? 0) === 0;
+    // The legacy "primary" slot is owned by the very first drawing on the
+    // page; check the live store so multiple uploads in a single session
+    // append instead of overwriting the first one.
+    const liveDrawings = useEditor.getState().drawings;
+    const hasPrimary = !!liveDrawings["primary"] || !!initial.signedUrl;
+    const isPrimary = !hasPrimary && Object.keys(liveDrawings).length === 0;
     const path = `${initial.orgId}/${initial.projectId}/${initial.page.id}/${
       isPrimary ? "" : `layers/${layerId}/`
     }${fileName}`;
@@ -1057,6 +1105,8 @@ export function Editor({ initial }: { initial: InitialData }) {
           name: fileName,
           sortOrder: 0,
           visible: true,
+          tx: opts?.tx,
+          ty: opts?.ty,
         });
       }
     } else {
@@ -1073,6 +1123,8 @@ export function Editor({ initial }: { initial: InitialData }) {
         file_name: fileName,
         file_size: blob.size,
         sort_order: existingMax,
+        x: opts?.tx ?? 0,
+        y: opts?.ty ?? 0,
       });
       const { data: signed } = await supabase.storage
         .from("drawings")
@@ -1085,10 +1137,11 @@ export function Editor({ initial }: { initial: InitialData }) {
           name: fileName,
           sortOrder: existingMax,
           visible: true,
+          tx: opts?.tx,
+          ty: opts?.ty,
         });
       }
     }
-    setUploadStatus(null);
   }
 
   async function updateDrawingTransform(
@@ -1133,6 +1186,71 @@ export function Editor({ initial }: { initial: InitialData }) {
       .from("page_drawings")
       .update({ visible })
       .eq("id", id);
+  }
+
+  // Persist a new layer ordering after a drag-and-drop reorder. The ordered
+  // ids run from bottom to top; we map to consecutive sort_order values and
+  // upsert each row in parallel.
+  async function reorderDrawings(orderedIds: string[]) {
+    useEditor.getState().setDrawingOrder(orderedIds);
+    const updates = orderedIds
+      .map((id, i) => ({ id, sortOrder: i }))
+      .filter((u) => u.id !== "primary");
+    await Promise.all(
+      updates.map((u) =>
+        supabase
+          .from("page_drawings")
+          .update({ sort_order: u.sortOrder })
+          .eq("id", u.id),
+      ),
+    );
+  }
+
+  // Reorder placed items by rewriting their z_order based on the dropped
+  // sequence (top of list = highest z_order). Items panel sorts descending
+  // so we map index 0 to the largest z.
+  async function reorderPlacedItems(orderedIds: string[]) {
+    const total = orderedIds.length;
+    const updates = orderedIds.map((id, i) => ({ id, z: total - i }));
+    for (const u of updates) {
+      const cur = useEditor.getState().placedItems[u.id];
+      if (cur) {
+        useEditor
+          .getState()
+          .upsertPlacedItem({ ...cur, z_order: u.z as any });
+      }
+    }
+    await Promise.all(
+      updates
+        .filter((u) => !u.id.startsWith("tmp-"))
+        .map((u) =>
+          supabase
+            .from("placed_items")
+            .update({ z_order: u.z })
+            .eq("id", u.id),
+        ),
+    );
+  }
+
+  async function reorderShapes(orderedIds: string[]) {
+    const total = orderedIds.length;
+    const updates = orderedIds.map((id, i) => ({ id, z: total - i }));
+    for (const u of updates) {
+      const cur = useEditor.getState().shapes[u.id];
+      if (cur) {
+        useEditor.getState().upsertShape({ ...cur, z_order: u.z as any });
+      }
+    }
+    await Promise.all(
+      updates
+        .filter((u) => !u.id.startsWith("tmp-"))
+        .map((u) =>
+          supabase
+            .from("shapes")
+            .update({ z_order: u.z })
+            .eq("id", u.id),
+        ),
+    );
   }
 
   async function deleteDrawing(id: string) {
@@ -1219,6 +1337,9 @@ export function Editor({ initial }: { initial: InitialData }) {
         onDeletePlacedItem={deletePlacedItem}
         onDeleteShape={deleteShape}
         onDeleteNote={deleteNote}
+        onReorderDrawings={reorderDrawings}
+        onReorderPlacedItems={reorderPlacedItems}
+        onReorderShapes={reorderShapes}
         page={{
           orgSlug: initial.orgSlug,
           projectId: initial.projectId,
@@ -1472,7 +1593,7 @@ function FileDropOverlay({
   onUpload,
 }: {
   empty: boolean;
-  onUpload: (f: File) => void;
+  onUpload: (f: File) => void | Promise<unknown>;
 }) {
   const [over, setOver] = useState(false);
 
@@ -1504,8 +1625,11 @@ function FileDropOverlay({
       e.preventDefault();
       depth = 0;
       setOver(false);
-      const f = e.dataTransfer?.files?.[0];
-      if (f) onUpload(f);
+      const files = Array.from(e.dataTransfer?.files || []);
+      // Sequence so primary-detection is correct.
+      (async () => {
+        for (const f of files) await onUpload(f);
+      })();
     };
     document.addEventListener("dragenter", onDragEnter);
     document.addEventListener("dragover", onDragOver);
@@ -1536,11 +1660,12 @@ function FileDropOverlay({
           <Upload size={14} /> Add a drawing
           <input
             type="file"
+            multiple
             className="hidden"
-            
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) onUpload(f);
+            onChange={async (e) => {
+              const files = Array.from(e.currentTarget.files || []);
+              e.currentTarget.value = "";
+              for (const f of files) await onUpload(f);
             }}
           />
         </label>

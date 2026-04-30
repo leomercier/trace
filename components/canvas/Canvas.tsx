@@ -641,10 +641,33 @@ export function Canvas({
           // Resize by enlarging both edges symmetrically about centre.
           const newSW = Math.max(0.1, itemDrag.itemStart.scale_w + (lx * 2) / baseW);
           const newSD = Math.max(0.1, itemDrag.itemStart.scale_d + (ly * 2) / baseD);
-          const aspectLock = e.shiftKey;
-          const sW = aspectLock ? Math.max(newSW, newSD) : newSW;
-          const sD = aspectLock ? Math.max(newSW, newSD) : newSD;
-          onItemResize?.(itemDrag.id, sW, sD);
+          // Aspect-ratio lock: the inspector chain icon flips a per-item
+          // flag; Shift inverts the live mode so a momentary keypress can
+          // override either preset without changing the persisted setting.
+          const sticky = !!useEditor.getState().aspectLockedItems[itemDrag.id];
+          const aspectLock = sticky !== e.shiftKey;
+          if (aspectLock) {
+            const startRatio =
+              itemDrag.itemStart.scale_d === 0
+                ? 1
+                : itemDrag.itemStart.scale_w / itemDrag.itemStart.scale_d;
+            // Pick whichever axis the user dragged more, project the other
+            // to maintain the original W:D.
+            const dW = Math.abs(newSW - itemDrag.itemStart.scale_w);
+            const dD = Math.abs(newSD - itemDrag.itemStart.scale_d);
+            let sW: number;
+            let sD: number;
+            if (dW >= dD) {
+              sW = newSW;
+              sD = startRatio === 0 ? newSW : sW / startRatio;
+            } else {
+              sD = newSD;
+              sW = sD * startRatio;
+            }
+            onItemResize?.(itemDrag.id, Math.max(0.1, sW), Math.max(0.1, sD));
+          } else {
+            onItemResize?.(itemDrag.id, newSW, newSD);
+          }
         } else if (itemDrag.mode === "rotate") {
           const cx = itemDrag.itemStart.x;
           const cy = itemDrag.itemStart.y;
