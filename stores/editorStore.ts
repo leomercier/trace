@@ -67,6 +67,10 @@ export interface EditorState {
   // grid
   grid: { visible: boolean; sizeMM: number };
 
+  // Per-item aspect-ratio lock (UI-only). When true, resizing the item via
+  // canvas handles preserves W:D; Shift+drag inverts the lock for that drag.
+  aspectLockedItems: Record<string, true>;
+
   // drawing entities (parsed from source file). Live in memory only.
   entities: ParsedEntity[];
   entitiesLoaded: boolean;
@@ -112,11 +116,14 @@ export interface EditorState {
     id: string,
     patch: Partial<Pick<Drawing, "tx" | "ty" | "scale" | "rotation" | "locked">>,
   ) => void;
+  /** Replace drawing sortOrders in bulk (used by drag-and-drop reordering). */
+  setDrawingOrder: (orderedIds: string[]) => void;
   upsertCursor: (c: RemoteCursor) => void;
   removeCursor: (userId: string) => void;
   toggleLayer: (k: keyof EditorState["layers"]) => void;
   toggleGrid: () => void;
   setGridSize: (mm: number) => void;
+  toggleAspectLock: (id: string) => void;
 }
 
 export type ParsedEntity =
@@ -288,6 +295,7 @@ export const useEditor = create<EditorState>((set) => ({
   cursors: {},
   layers: { measurements: true, notes: true, cursors: true, items: true, shapes: true },
   grid: { visible: true, sizeMM: 1000 },
+  aspectLockedItems: {},
   entities: [],
   entitiesLoaded: false,
   drawings: {},
@@ -394,6 +402,16 @@ export const useEditor = create<EditorState>((set) => ({
       const { entities, bounds } = recomputeEntities(drawings);
       return { drawings, entities, bounds: bounds ?? s.bounds };
     }),
+  setDrawingOrder: (orderedIds) =>
+    set((s) => {
+      const next: Record<string, Drawing> = { ...s.drawings };
+      orderedIds.forEach((id, i) => {
+        const cur = next[id];
+        if (cur) next[id] = { ...cur, sortOrder: i };
+      });
+      const { entities, bounds } = recomputeEntities(next);
+      return { drawings: next, entities, bounds: bounds ?? s.bounds };
+    }),
   upsertCursor: (c) =>
     set((s) => ({ cursors: { ...s.cursors, [c.userId]: c } })),
   removeCursor: (userId) =>
@@ -409,4 +427,11 @@ export const useEditor = create<EditorState>((set) => ({
     set((s) => ({
       grid: { ...s.grid, sizeMM: Math.max(1, Math.round(mm)) },
     })),
+  toggleAspectLock: (id) =>
+    set((s) => {
+      const cur = { ...s.aspectLockedItems };
+      if (cur[id]) delete cur[id];
+      else cur[id] = true;
+      return { aspectLockedItems: cur };
+    }),
 }));

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Copy, LogOut, Package, Share2, Sparkles } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { createClient } from "@/lib/supabase/client";
 
 /**
@@ -69,50 +70,58 @@ export function EditorActions({
   const showLabels = variant === "desktop";
 
   return (
-    <div className="flex items-center gap-1.5 border-b border-border bg-panel px-2 py-2">
+    <div className="flex min-w-0 flex-wrap items-center gap-1 border-b border-border bg-panel px-2 py-2">
       {org.isAnonymous ? (
-        <button
-          onClick={copyShareUrl}
-          title="Copy public link — anyone with this URL can collaborate"
-          className="flex h-8 items-center gap-1.5 rounded-md border border-yellow-200 bg-yellow-50 px-2 text-[11px] text-yellow-900 hover:border-yellow-300"
-        >
-          {copied ? <Check size={12} /> : <Copy size={12} />}
-          <span>{copied ? "Copied" : org.expiresAt ? `Sandbox · ${daysLeft(org.expiresAt)}` : "Sandbox"}</span>
-        </button>
+        <Tooltip content="Copy public link — anyone with this URL can collaborate">
+          <button
+            onClick={copyShareUrl}
+            className="flex h-8 shrink-0 items-center gap-1 rounded-md border border-yellow-200 bg-yellow-50 px-1.5 text-[11px] text-yellow-900 hover:border-yellow-300"
+          >
+            {copied ? <Check size={12} /> : <Copy size={12} />}
+            <span className="whitespace-nowrap">
+              {copied ? "Copied" : org.expiresAt ? `Sandbox · ${daysLeft(org.expiresAt)}` : "Sandbox"}
+            </span>
+          </button>
+        </Tooltip>
       ) : null}
       {canEdit ? (
-        <button
-          onClick={onInventory}
-          title="Inventory (⌘I)"
-          className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-panel-muted px-2 text-[11px] hover:bg-panel"
-        >
-          <Package size={12} /> {showLabels ? <span>Inventory</span> : null}
-        </button>
+        <Tooltip content="Inventory" shortcut="⌘I">
+          <button
+            onClick={onInventory}
+            className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-panel-muted px-2 text-[11px] hover:bg-panel"
+          >
+            <Package size={12} /> {showLabels ? <span>Inventory</span> : null}
+          </button>
+        </Tooltip>
       ) : null}
-      <button
-        onClick={onAssistant}
-        title="Ask AI (⌘K)"
-        className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-panel-muted px-2 text-[11px] hover:bg-panel"
-        style={{ color: "#7c3aed" }}
-      >
-        <Sparkles size={12} /> {showLabels ? <span>Ask AI</span> : null}
-      </button>
-      {canAdmin ? (
+      <Tooltip content="Ask AI" shortcut="⌘K">
         <button
-          onClick={onShare}
-          title="Share"
-          className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-panel-muted px-2 text-[11px] hover:bg-panel"
+          onClick={onAssistant}
+          className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-panel-muted px-2 text-[11px] hover:bg-panel"
+          style={{ color: "#7c3aed" }}
         >
-          <Share2 size={12} /> {showLabels ? <span>Share</span> : null}
+          <Sparkles size={12} /> {showLabels ? <span>Ask AI</span> : null}
         </button>
+      </Tooltip>
+      {canAdmin ? (
+        <Tooltip content="Share this page">
+          <button
+            onClick={onShare}
+            className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-panel-muted px-2 text-[11px] hover:bg-panel"
+          >
+            <Share2 size={12} /> {showLabels ? <span>Share</span> : null}
+          </button>
+        </Tooltip>
       ) : null}
       {others.length > 0 ? (
-        <div className="ml-auto flex items-center" title={others.map((o) => o.name).join(", ")}>
+        <div className="ml-auto flex shrink-0 items-center">
           <div className="flex -space-x-2">
             {others.slice(0, 4).map((u) => (
-              <div key={u.userId} className="rounded-full border-2 border-panel" title={u.name}>
-                <Avatar name={u.name} color={u.color} size={20} />
-              </div>
+              <Tooltip key={u.userId} content={u.name}>
+                <div className="rounded-full border-2 border-panel">
+                  <Avatar name={u.name} color={u.color} size={20} />
+                </div>
+              </Tooltip>
             ))}
             {others.length > 4 ? (
               <span className="ml-2 self-center text-[10px] text-ink-faint">
@@ -124,16 +133,17 @@ export function EditorActions({
       ) : null}
       <div
         ref={profileRef}
-        className={`relative ${others.length > 0 ? "" : "ml-auto"}`}
+        className={`relative shrink-0 ${others.length > 0 ? "" : "ml-auto"}`}
       >
-        <button
-          onClick={() => setProfileOpen((v) => !v)}
-          className="flex items-center rounded-full p-0.5 hover:bg-panel-muted"
-          aria-label="Profile"
-          title={user.email || "Profile"}
-        >
-          <Avatar name={user.name} src={user.avatar} size={26} />
-        </button>
+        <Tooltip content={user.email || "Profile"}>
+          <button
+            onClick={() => setProfileOpen((v) => !v)}
+            className="flex items-center rounded-full p-0.5 hover:bg-panel-muted"
+            aria-label="Profile"
+          >
+            <Avatar name={user.name} src={user.avatar} size={26} />
+          </button>
+        </Tooltip>
         {profileOpen ? (
           <div className="absolute right-0 top-full z-50 mt-1 w-60 rounded-md border border-border bg-panel p-1 shadow-lg">
             <div className="px-3 py-2 text-xs text-ink-faint">

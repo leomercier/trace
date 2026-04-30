@@ -14,6 +14,8 @@ import {
   ChevronDown,
   ChevronsUp,
   ChevronsDown,
+  Link2,
+  Link2Off,
 } from "lucide-react";
 
 export function Inspector({
@@ -531,6 +533,35 @@ function PlacedItemProperties({
   const areaM2 = (w / 1000) * (d / 1000);
   const rotation = Math.round((((Number(item.rotation) || 0) % 360) + 360) % 360);
   const editable = canEdit && !item.locked;
+  const aspectLocked = useEditor((s) => !!s.aspectLockedItems[item.id]);
+  const toggleAspectLock = useEditor((s) => s.toggleAspectLock);
+
+  // When aspect ratio is locked, editing one of W/D scales the other to
+  // preserve the current ratio. Otherwise each axis stays independent.
+  const startRatioWD =
+    Number(item.scale_d) > 0 ? Number(item.scale_w) / Number(item.scale_d) : 1;
+  function commitW(newMm: number) {
+    const newScaleW = newMm / item.width_mm;
+    if (aspectLocked && startRatioWD > 0) {
+      onUpdate({
+        scale_w: newScaleW as any,
+        scale_d: (newScaleW / startRatioWD) as any,
+      });
+    } else {
+      onUpdate({ scale_w: newScaleW as any });
+    }
+  }
+  function commitD(newMm: number) {
+    const newScaleD = newMm / item.depth_mm;
+    if (aspectLocked) {
+      onUpdate({
+        scale_w: (newScaleD * startRatioWD) as any,
+        scale_d: newScaleD as any,
+      });
+    } else {
+      onUpdate({ scale_d: newScaleD as any });
+    }
+  }
 
   return (
     <div className="mt-3 space-y-3">
@@ -557,22 +588,49 @@ function PlacedItemProperties({
         ) : null}
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
-        <DimField
-          label="W"
-          unit={unit}
-          mm={w}
-          editable={editable}
-          onCommit={(newMm) => onUpdate({ scale_w: newMm / item.width_mm })}
-        />
-        <DimField
-          label="D"
-          unit={unit}
-          mm={d}
-          editable={editable}
-          onCommit={(newMm) => onUpdate({ scale_d: newMm / item.depth_mm })}
-        />
-        <DimField label="H" unit={unit} mm={h} editable={false} />
+      <div className="flex items-stretch gap-1.5">
+        <div className="flex-1">
+          <DimField
+            label="W"
+            unit={unit}
+            mm={w}
+            editable={editable}
+            onCommit={commitW}
+          />
+        </div>
+        {editable ? (
+          <button
+            onClick={() => toggleAspectLock(item.id)}
+            className={`flex w-7 shrink-0 items-center justify-center self-stretch rounded border text-xs ${
+              aspectLocked
+                ? "border-ink bg-ink text-white"
+                : "border-border bg-panel-muted text-ink-muted hover:text-ink"
+            }`}
+            title={
+              aspectLocked
+                ? "Aspect ratio locked — drag freely with Shift to override"
+                : "Link width and depth (Shift+drag for proportional resize)"
+            }
+            aria-pressed={aspectLocked}
+            aria-label={aspectLocked ? "Unlock aspect ratio" : "Lock aspect ratio"}
+          >
+            {aspectLocked ? <Link2 size={11} /> : <Link2Off size={11} />}
+          </button>
+        ) : (
+          <span className="w-7 shrink-0" aria-hidden />
+        )}
+        <div className="flex-1">
+          <DimField
+            label="D"
+            unit={unit}
+            mm={d}
+            editable={editable}
+            onCommit={commitD}
+          />
+        </div>
+        <div className="flex-1">
+          <DimField label="H" unit={unit} mm={h} editable={false} />
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-2 text-xs">

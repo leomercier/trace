@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   Eye,
   EyeOff,
+  GripVertical,
   Lock,
   Unlock,
   Plus,
@@ -47,6 +48,9 @@ export function LayersPanel({
   onDeletePlacedItem,
   onDeleteShape,
   onDeleteNote,
+  onReorderDrawings,
+  onReorderPlacedItems,
+  onReorderShapes,
   page,
 }: {
   canEdit: boolean;
@@ -60,6 +64,10 @@ export function LayersPanel({
   onDeletePlacedItem: (id: string) => void;
   onDeleteShape: (id: string) => void;
   onDeleteNote: (id: string) => void;
+  /** Persist a new drawing-layer ordering (bottom-to-top). */
+  onReorderDrawings?: (orderedIds: string[]) => void;
+  onReorderPlacedItems?: (orderedIds: string[]) => void;
+  onReorderShapes?: (orderedIds: string[]) => void;
   page: {
     orgSlug: string;
     projectId: string;
@@ -81,8 +89,11 @@ export function LayersPanel({
   const selection = useEditor((s) => s.selection);
   const setSelection = useEditor((s) => s.setSelection);
 
+  // Lists are displayed top-of-list = frontmost layer (matches Figma /
+  // Photoshop). Drawings sort by sortOrder descending; items and shapes by
+  // z_order descending with created_at as tiebreaker.
   const drawingList = Object.values(drawings).sort(
-    (a, b) => a.sortOrder - b.sortOrder,
+    (a, b) => b.sortOrder - a.sortOrder,
   );
   const itemList = Object.values(placedItems).sort(
     (a, b) =>
@@ -98,6 +109,94 @@ export function LayersPanel({
     (a, b) =>
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
+
+  type DragKind = "drawing" | "placed" | "shape";
+  const [drag, setDrag] = useState<{
+    kind: DragKind;
+    fromId: string;
+    overId: string | null;
+  } | null>(null);
+
+  function reorderForKind(kind: DragKind, fromId: string, beforeId: string) {
+    if (fromId === beforeId) return;
+    const list =
+      kind === "drawing"
+        ? drawingList.map((d) => d.id)
+        : kind === "placed"
+        ? itemList.map((p) => p.id)
+        : shapeList.map((s) => s.id);
+    const without = list.filter((id) => id !== fromId);
+    const insertAt = without.indexOf(beforeId);
+    if (insertAt < 0) return;
+    without.splice(insertAt, 0, fromId);
+    if (kind === "drawing") {
+      // The handler expects bottom-to-top ordering, but the panel shows
+      // top-to-bottom — reverse before persisting.
+      onReorderDrawings?.([...without].reverse());
+    } else if (kind === "placed") {
+      onReorderPlacedItems?.(without);
+    } else {
+      onReorderShapes?.(without);
+    }
+  }
+
+  // Dropping below the last row (no specific over target): append to the
+  // bottom of the visual list (= back of the canvas).
+  function reorderToEnd(kind: DragKind, fromId: string) {
+    const list =
+      kind === "drawing"
+        ? drawingList.map((d) => d.id)
+        : kind === "placed"
+        ? itemList.map((p) => p.id)
+        : shapeList.map((s) => s.id);
+    const without = list.filter((id) => id !== fromId);
+    without.push(fromId);
+    if (kind === "drawing") onReorderDrawings?.([...without].reverse());
+    else if (kind === "placed") onReorderPlacedItems?.(without);
+    else onReorderShapes?.(without);
+  }
+
+  const dragRow = canEdit
+    ? (kind: DragKind, id: string) => ({
+        draggable: true as const,
+        onDragStart: (e: React.DragEvent) => {
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", id);
+          setDrag({ kind, fromId: id, overId: null });
+        },
+        onDragOver: (e: React.DragEvent) => {
+          if (drag?.kind !== kind || drag?.fromId === id) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          setDrag((d) => (d ? { ...d, overId: id } : d));
+        },
+        onDrop: (e: React.DragEvent) => {
+          if (drag?.kind !== kind || !drag?.fromId) return;
+          e.preventDefault();
+          reorderForKind(kind, drag.fromId, id);
+          setDrag(null);
+        },
+        onDragEnd: () => setDrag(null),
+        dropIndicator:
+          drag?.kind === kind && drag.overId === id && drag.fromId !== id,
+      })
+    : undefined;
+
+  const sectionDropProps = canEdit
+    ? (kind: DragKind) => ({
+        onDragOver: (e: React.DragEvent) => {
+          if (drag?.kind === kind) e.preventDefault();
+        },
+        onDrop: (e: React.DragEvent) => {
+          if (drag?.kind !== kind || !drag?.fromId) return;
+          // Only handle the bare-section drop when not dropped on a row.
+          if (drag.overId) return;
+          e.preventDefault();
+          reorderToEnd(kind, drag.fromId);
+          setDrag(null);
+        },
+      })
+    : undefined;
 
   const Body = (
     <>
@@ -141,6 +240,7 @@ export function LayersPanel({
             title="Drawings"
             count={drawingList.length}
             visible={true /* drawings live outside `layers` toggles */}
+            dropProps={sectionDropProps?.("drawing")}
             empty={
               <div className="rounded-md border border-dashed border-border p-3 text-center text-xs text-ink-muted">
                 No drawings yet.
@@ -161,11 +261,12 @@ export function LayersPanel({
                   <Plus size={14} />
                   <input
                     type="file"
+                    multiple
                     className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) onUpload(f);
+                    onChange={async (e) => {
+                      const files = Array.from(e.currentTarget.files || []);
                       e.currentTarget.value = "";
+                      for (const f of files) await onUpload(f);
                     }}
                   />
                 </label>
@@ -175,6 +276,7 @@ export function LayersPanel({
             {drawingList.map((d) => {
               const isSelected =
                 selection?.kind === "drawing" && selection.id === d.id;
+              const dr = dragRow?.("drawing", d.id);
               return (
                 <Row
                   key={d.id}
@@ -198,6 +300,7 @@ export function LayersPanel({
                   icon={<FileText size={12} />}
                   label={d.name}
                   badge={d.fileType.toUpperCase()}
+                  drag={dr}
                 />
               );
             })}
@@ -209,6 +312,7 @@ export function LayersPanel({
             count={itemList.length}
             visible={layers.items}
             onToggleVisible={() => toggleLayer("items")}
+            dropProps={sectionDropProps?.("placed")}
           >
             {itemList.map((p) => (
               <Row
@@ -219,6 +323,7 @@ export function LayersPanel({
                 icon={<Package size={12} />}
                 label={p.name}
                 badge={`${p.width_mm}×${p.depth_mm}`}
+                drag={dragRow?.("placed", p.id)}
               />
             ))}
           </Section>
@@ -229,6 +334,7 @@ export function LayersPanel({
             count={shapeList.length}
             visible={layers.shapes}
             onToggleVisible={() => toggleLayer("shapes")}
+            dropProps={sectionDropProps?.("shape")}
           >
             {shapeList.map((s) => (
               <Row
@@ -239,6 +345,7 @@ export function LayersPanel({
                 icon={shapeIcon(s)}
                 label={shapeLabel(s)}
                 badge={s.kind.toUpperCase()}
+                drag={dragRow?.("shape", s.id)}
               />
             ))}
           </Section>
@@ -300,6 +407,7 @@ function Section({
   action,
   empty,
   children,
+  dropProps,
 }: {
   title: string;
   count: number;
@@ -308,6 +416,10 @@ function Section({
   action?: React.ReactNode;
   empty?: React.ReactNode;
   children?: React.ReactNode;
+  dropProps?: {
+    onDragOver: (e: React.DragEvent) => void;
+    onDrop: (e: React.DragEvent) => void;
+  };
 }) {
   return (
     <section>
@@ -335,7 +447,7 @@ function Section({
         {action}
       </div>
       {count === 0 ? empty || null : (
-        <ul className="space-y-0.5">{children}</ul>
+        <ul className="space-y-0.5" {...(dropProps || {})}>{children}</ul>
       )}
     </section>
   );
@@ -352,6 +464,7 @@ function Row({
   icon,
   label,
   badge,
+  drag,
 }: {
   selected: boolean;
   visible?: boolean;
@@ -363,14 +476,42 @@ function Row({
   icon: React.ReactNode;
   label: string;
   badge?: string;
+  drag?: {
+    draggable: true;
+    onDragStart: (e: React.DragEvent) => void;
+    onDragOver: (e: React.DragEvent) => void;
+    onDrop: (e: React.DragEvent) => void;
+    onDragEnd: () => void;
+    dropIndicator: boolean;
+  };
 }) {
+  const dropIndicator = drag?.dropIndicator;
   return (
     <li
       onClick={onSelect}
-      className={`group flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm ${
+      draggable={drag?.draggable}
+      onDragStart={drag?.onDragStart}
+      onDragOver={drag?.onDragOver}
+      onDrop={drag?.onDrop}
+      onDragEnd={drag?.onDragEnd}
+      className={`group relative flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm ${
         selected ? "bg-panel-muted ring-1 ring-ink/20" : "hover:bg-panel-muted"
-      }`}
+      } ${dropIndicator ? "ring-1 ring-ink/40" : ""}`}
     >
+      {dropIndicator ? (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-x-1 -top-px h-0.5 rounded-full bg-ink"
+        />
+      ) : null}
+      {drag ? (
+        <span
+          aria-hidden
+          className="-ml-1 cursor-grab text-ink-faint opacity-0 transition-opacity group-hover:opacity-100 active:cursor-grabbing"
+        >
+          <GripVertical size={12} />
+        </span>
+      ) : null}
       {onToggleVisible ? (
         <button
           onClick={(e) => {
