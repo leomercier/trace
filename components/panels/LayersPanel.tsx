@@ -14,6 +14,7 @@ import {
   X,
   Image as ImageIcon,
   Square,
+  SquareDashed,
   Type,
   StickyNote,
   Package,
@@ -48,6 +49,7 @@ export function LayersPanel({
   onDeletePlacedItem,
   onDeleteShape,
   onDeleteNote,
+  onDeleteFrame,
   onReorderDrawings,
   onReorderPlacedItems,
   onReorderShapes,
@@ -64,6 +66,7 @@ export function LayersPanel({
   onDeletePlacedItem: (id: string) => void;
   onDeleteShape: (id: string) => void;
   onDeleteNote: (id: string) => void;
+  onDeleteFrame?: (id: string) => void;
   /** Persist a new drawing-layer ordering (bottom-to-top). */
   onReorderDrawings?: (orderedIds: string[]) => void;
   onReorderPlacedItems?: (orderedIds: string[]) => void;
@@ -84,10 +87,17 @@ export function LayersPanel({
   const placedItems = useEditor((s) => s.placedItems);
   const shapes = useEditor((s) => s.shapes);
   const notes = useEditor((s) => s.notes);
+  const frames = useEditor((s) => s.frames);
   const layers = useEditor((s) => s.layers);
   const toggleLayer = useEditor((s) => s.toggleLayer);
   const selection = useEditor((s) => s.selection);
   const setSelection = useEditor((s) => s.setSelection);
+
+  const frameList = Object.values(frames).sort(
+    (a, b) =>
+      Number(b.z_order ?? 0) - Number(a.z_order ?? 0) ||
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  );
 
   // Lists are displayed top-of-list = frontmost layer (matches Figma /
   // Photoshop). Drawings sort by sortOrder descending; items and shapes by
@@ -168,7 +178,10 @@ export function LayersPanel({
           if (drag?.kind !== kind || drag?.fromId === id) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = "move";
-          setDrag((d) => (d ? { ...d, overId: id } : d));
+          // Bail out if the over-target hasn't changed — every dragover
+          // event would otherwise rerender the entire section list, which
+          // visibly flickers the rows mid-drag.
+          setDrag((d) => (d && d.overId !== id ? { ...d, overId: id } : d));
         },
         onDrop: (e: React.DragEvent) => {
           if (drag?.kind !== kind || !drag?.fromId) return;
@@ -179,6 +192,7 @@ export function LayersPanel({
         onDragEnd: () => setDrag(null),
         dropIndicator:
           drag?.kind === kind && drag.overId === id && drag.fromId !== id,
+        isDragSource: drag?.kind === kind && drag.fromId === id,
       })
     : undefined;
 
@@ -304,6 +318,26 @@ export function LayersPanel({
                 />
               );
             })}
+          </Section>
+
+          {/* Canvases (frames) */}
+          <Section
+            title="Canvases"
+            count={frameList.length}
+            visible={layers.frames}
+            onToggleVisible={() => toggleLayer("frames")}
+          >
+            {frameList.map((f) => (
+              <Row
+                key={f.id}
+                selected={selection?.kind === "frame" && selection.id === f.id}
+                onSelect={() => setSelection({ kind: "frame", id: f.id })}
+                onDelete={canEdit && onDeleteFrame ? () => onDeleteFrame(f.id) : undefined}
+                icon={<SquareDashed size={12} />}
+                label={f.name}
+                badge={`${Math.round(Number(f.w))}×${Math.round(Number(f.h))}`}
+              />
+            ))}
           </Section>
 
           {/* Placed inventory items */}
@@ -483,9 +517,11 @@ function Row({
     onDrop: (e: React.DragEvent) => void;
     onDragEnd: () => void;
     dropIndicator: boolean;
+    isDragSource: boolean;
   };
 }) {
   const dropIndicator = drag?.dropIndicator;
+  const isDragSource = drag?.isDragSource;
   return (
     <li
       onClick={onSelect}
@@ -496,7 +532,9 @@ function Row({
       onDragEnd={drag?.onDragEnd}
       className={`group relative flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm ${
         selected ? "bg-panel-muted ring-1 ring-ink/20" : "hover:bg-panel-muted"
-      } ${dropIndicator ? "ring-1 ring-ink/40" : ""}`}
+      } ${dropIndicator ? "ring-1 ring-ink/40" : ""} ${
+        isDragSource ? "opacity-50" : ""
+      }`}
     >
       {dropIndicator ? (
         <span

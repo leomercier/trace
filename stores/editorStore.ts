@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { Measurement, Note, PlacedItem, Shape } from "@/lib/supabase/types";
+import type { Frame, Measurement, Note, PlacedItem, Shape } from "@/lib/supabase/types";
 import type { Bounds, Pt } from "@/lib/utils/geometry";
 import type { Unit } from "@/lib/utils/units";
 
@@ -13,7 +13,8 @@ export type Tool =
   | "calibrate"
   | "line"
   | "rect"
-  | "text";
+  | "text"
+  | "frame";
 export type Role = "owner" | "admin" | "editor" | "viewer";
 
 export interface RemoteCursor {
@@ -38,7 +39,7 @@ export interface EditorState {
   tool: Tool;
   draft: { tool: Tool; start: Pt; end: Pt } | null;
   selection:
-    | { kind: "measurement" | "note" | "placed" | "shape" | "drawing"; id: string }
+    | { kind: "measurement" | "note" | "placed" | "shape" | "drawing" | "frame"; id: string }
     | null;
   // Additional placed-item selections (multi-select). The primary item lives
   // in `selection`; these are siblings.
@@ -49,6 +50,7 @@ export interface EditorState {
   notes: Record<string, Note>;
   placedItems: Record<string, PlacedItem>;
   shapes: Record<string, Shape>;
+  frames: Record<string, Frame>;
   scale: { realPerUnit: number; unit: Unit } | null;
   bounds: Bounds | null;
 
@@ -62,6 +64,7 @@ export interface EditorState {
     cursors: boolean;
     items: boolean;
     shapes: boolean;
+    frames: boolean;
   };
 
   // grid
@@ -88,6 +91,7 @@ export interface EditorState {
     notes: Note[];
     placedItems: PlacedItem[];
     shapes: Shape[];
+    frames: Frame[];
     scale: { realPerUnit: number; unit: Unit } | null;
     bounds: Bounds | null;
   }) => void;
@@ -103,8 +107,13 @@ export interface EditorState {
   removeNote: (id: string) => void;
   upsertPlacedItem: (p: PlacedItem) => void;
   removePlacedItem: (id: string) => void;
+  /** One-set update for many items (used by reorder). */
+  patchPlacedItems: (patches: { id: string; patch: Partial<PlacedItem> }[]) => void;
   upsertShape: (s: Shape) => void;
   removeShape: (id: string) => void;
+  patchShapes: (patches: { id: string; patch: Partial<Shape> }[]) => void;
+  upsertFrame: (f: Frame) => void;
+  removeFrame: (id: string) => void;
   setScale: (realPerUnit: number, unit: Unit) => void;
   setBounds: (b: Bounds) => void;
   setEntities: (entities: ParsedEntity[]) => void;
@@ -290,17 +299,18 @@ export const useEditor = create<EditorState>((set) => ({
   notes: {},
   placedItems: {},
   shapes: {},
+  frames: {},
   scale: null,
   bounds: null,
   cursors: {},
-  layers: { measurements: true, notes: true, cursors: true, items: true, shapes: true },
+  layers: { measurements: true, notes: true, cursors: true, items: true, shapes: true, frames: true },
   grid: { visible: true, sizeMM: 1000 },
   aspectLockedItems: {},
   entities: [],
   entitiesLoaded: false,
   drawings: {},
 
-  init: ({ pageId, role, measurements, notes, placedItems, shapes, scale, bounds }) =>
+  init: ({ pageId, role, measurements, notes, placedItems, shapes, frames, scale, bounds }) =>
     set(() => ({
       pageId,
       role,
@@ -309,6 +319,7 @@ export const useEditor = create<EditorState>((set) => ({
       notes: Object.fromEntries(notes.map((n) => [n.id, n])),
       placedItems: Object.fromEntries(placedItems.map((p) => [p.id, p])),
       shapes: Object.fromEntries(shapes.map((s) => [s.id, s])),
+      frames: Object.fromEntries(frames.map((f) => [f.id, f])),
       scale,
       bounds,
       tool: role !== "viewer" ? "select" : "pan",
@@ -352,12 +363,37 @@ export const useEditor = create<EditorState>((set) => ({
       const { [id]: _, ...rest } = s.placedItems;
       return { placedItems: rest };
     }),
+  patchPlacedItems: (patches) =>
+    set((s) => {
+      const next = { ...s.placedItems };
+      for (const { id, patch } of patches) {
+        const cur = next[id];
+        if (cur) next[id] = { ...cur, ...patch };
+      }
+      return { placedItems: next };
+    }),
   upsertShape: (sh) =>
     set((s) => ({ shapes: { ...s.shapes, [sh.id]: sh } })),
   removeShape: (id) =>
     set((s) => {
       const { [id]: _, ...rest } = s.shapes;
       return { shapes: rest };
+    }),
+  patchShapes: (patches) =>
+    set((s) => {
+      const next = { ...s.shapes };
+      for (const { id, patch } of patches) {
+        const cur = next[id];
+        if (cur) next[id] = { ...cur, ...patch };
+      }
+      return { shapes: next };
+    }),
+  upsertFrame: (f) =>
+    set((s) => ({ frames: { ...s.frames, [f.id]: f } })),
+  removeFrame: (id) =>
+    set((s) => {
+      const { [id]: _, ...rest } = s.frames;
+      return { frames: rest };
     }),
   setScale: (realPerUnit, unit) => set({ scale: { realPerUnit, unit } }),
   setBounds: (b) => set({ bounds: b }),
