@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Eye,
   EyeOff,
@@ -93,31 +93,53 @@ export function LayersPanel({
   const selection = useEditor((s) => s.selection);
   const setSelection = useEditor((s) => s.setSelection);
 
-  const frameList = Object.values(frames).sort(
-    (a, b) =>
-      Number(b.z_order ?? 0) - Number(a.z_order ?? 0) ||
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  // The list-sort work is moderately expensive on pages with hundreds
+  // of items, and it ran on every panel re-render — including those
+  // triggered by an unrelated subscription (selection toggles, layer
+  // visibility, etc). Memoising on the source map's reference identity
+  // means the sort only re-runs when that category's data actually
+  // changed.
+  const frameList = useMemo(
+    () =>
+      Object.values(frames).sort(
+        (a, b) =>
+          Number(b.z_order ?? 0) - Number(a.z_order ?? 0) ||
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      ),
+    [frames],
   );
-
   // Lists are displayed top-of-list = frontmost layer (matches Figma /
   // Photoshop). Drawings sort by sortOrder descending; items and shapes by
   // z_order descending with created_at as tiebreaker.
-  const drawingList = Object.values(drawings).sort(
-    (a, b) => b.sortOrder - a.sortOrder,
+  const drawingList = useMemo(
+    () => Object.values(drawings).sort((a, b) => b.sortOrder - a.sortOrder),
+    [drawings],
   );
-  const itemList = Object.values(placedItems).sort(
-    (a, b) =>
-      Number(b.z_order ?? 0) - Number(a.z_order ?? 0) ||
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  const itemList = useMemo(
+    () =>
+      Object.values(placedItems).sort(
+        (a, b) =>
+          Number(b.z_order ?? 0) - Number(a.z_order ?? 0) ||
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      ),
+    [placedItems],
   );
-  const shapeList = Object.values(shapes).sort(
-    (a, b) =>
-      Number(b.z_order ?? 0) - Number(a.z_order ?? 0) ||
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  const shapeList = useMemo(
+    () =>
+      Object.values(shapes).sort(
+        (a, b) =>
+          Number(b.z_order ?? 0) - Number(a.z_order ?? 0) ||
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      ),
+    [shapes],
   );
-  const noteList = Object.values(notes).sort(
-    (a, b) =>
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  const noteList = useMemo(
+    () =>
+      Object.values(notes).sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      ),
+    [notes],
   );
 
   type DragKind = "drawing" | "placed" | "shape";

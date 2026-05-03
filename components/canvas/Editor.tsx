@@ -19,6 +19,7 @@ import type {
   Shape,
 } from "@/lib/supabase/types";
 import { createClient } from "@/lib/supabase/client";
+import { createPerIdThrottle } from "@/lib/utils/throttle";
 import { parseFile, inferFileType } from "./parsers";
 import { Button } from "@/components/ui/Button";
 import { Upload } from "lucide-react";
@@ -885,20 +886,32 @@ export function Editor({ initial }: { initial: InitialData }) {
     await supabase.from("notes").delete().eq("id", id);
   }
 
-  async function updateNote(n: Note) {
+  // Throttle DB writes during high-frequency drags. The store update is
+  // immediate (drives the optimistic on-canvas movement); only the
+  // network round-trip is bounded — at most one write per 120 ms per
+  // note, with a trailing-edge flush so the final position always lands.
+  const noteWriteThrottleRef = useRef<ReturnType<typeof createPerIdThrottle<Note>> | null>(null);
+  if (!noteWriteThrottleRef.current) {
+    noteWriteThrottleRef.current = createPerIdThrottle<Note>(120, async (n) => {
+      if (n.id.startsWith("tmp-")) return;
+      await supabase
+        .from("notes")
+        .update({
+          x: n.x,
+          y: n.y,
+          w: n.w,
+          h: n.h,
+          text: n.text,
+          color: n.color,
+          style: n.style,
+        })
+        .eq("id", n.id);
+    });
+  }
+
+  function updateNote(n: Note) {
     useEditor.getState().upsertNote(n);
-    await supabase
-      .from("notes")
-      .update({
-        x: n.x,
-        y: n.y,
-        w: n.w,
-        h: n.h,
-        text: n.text,
-        color: n.color,
-        style: n.style,
-      })
-      .eq("id", n.id);
+    noteWriteThrottleRef.current!.schedule(n);
   }
 
   async function applyCalibration(real: number, unit: any) {

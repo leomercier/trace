@@ -55,9 +55,25 @@ export class PlacedItemsLayer extends PIXI.Container {
   ) {
     const seen = new Set<string>();
     const z = this.viewport.zoom || 1;
+    const vis = this.viewport.getVisibleWorldBounds(40 / z);
 
     for (const item of items) {
       seen.add(item.id);
+      const scale = realPerUnit && realPerUnit > 0 ? realPerUnit : 1;
+      const wWorld = (item.width_mm / scale) * (Number(item.scale_w) || 1);
+      const dWorld = (item.depth_mm / scale) * (Number(item.scale_d) || 1);
+      // Conservative AABB for a rotated rectangle: half-diagonal in each
+      // axis. Slightly larger than the true AABB but cheap and only used
+      // for a viewport reject test.
+      const half = Math.hypot(wWorld, dWorld) / 2;
+      const cx = Number(item.x);
+      const cy = Number(item.y);
+      const offscreen =
+        cx + half < vis.minX ||
+        cx - half > vis.maxX ||
+        cy + half < vis.minY ||
+        cy - half > vis.maxY;
+
       let node = this.nodes.get(item.id);
       const textureKey = hashSvg(item.svg_markup);
 
@@ -85,13 +101,12 @@ export class PlacedItemsLayer extends PIXI.Container {
         });
       }
 
-      // World dimensions
-      const scale = realPerUnit && realPerUnit > 0 ? realPerUnit : 1;
-      const wWorld = item.width_mm / scale;
-      const dWorld = item.depth_mm / scale;
-      node.sprite.width = wWorld * (Number(item.scale_w) || 1);
-      node.sprite.height = dWorld * (Number(item.scale_d) || 1);
-      node.container.position.set(Number(item.x), Number(item.y));
+      node.container.visible = !offscreen;
+      if (offscreen) continue;
+
+      node.sprite.width = wWorld;
+      node.sprite.height = dWorld;
+      node.container.position.set(cx, cy);
       node.container.rotation = ((Number(item.rotation) || 0) * Math.PI) / 180;
     }
 

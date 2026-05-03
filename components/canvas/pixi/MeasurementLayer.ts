@@ -58,6 +58,10 @@ export class MeasurementLayer extends PIXI.Container {
   ) {
     const z = this.viewport.zoom || 1;
     const px = (n: number) => n / z;
+    // Visible-world AABB with padding so a measurement whose label sits
+    // outside the segment endpoints (large label_dx/dy) still renders
+    // when the line itself enters the viewport.
+    const vis = this.viewport.getVisibleWorldBounds(px(64));
 
     this.linesGfx.clear();
     this.leadersGfx.clear();
@@ -71,6 +75,28 @@ export class MeasurementLayer extends PIXI.Container {
         ay = +m.ay,
         bx = +m.bx,
         by = +m.by;
+      // Cull off-screen measurements. Include the offset label position
+      // in the AABB so labels dragged far from the segment still pull in.
+      const ldx = Number(m.label_dx ?? 0);
+      const ldy = Number(m.label_dy ?? 0);
+      const lmx = (ax + bx) / 2 + ldx;
+      const lmy = (ay + by) / 2 + ldy;
+      const aabbMinX = Math.min(ax, bx, lmx);
+      const aabbMinY = Math.min(ay, by, lmy);
+      const aabbMaxX = Math.max(ax, bx, lmx);
+      const aabbMaxY = Math.max(ay, by, lmy);
+      if (
+        aabbMaxX < vis.minX ||
+        aabbMinX > vis.maxX ||
+        aabbMaxY < vis.minY ||
+        aabbMinY > vis.maxY
+      ) {
+        const node = this.nodes.get(m.id);
+        if (node) node.container.visible = false;
+        continue;
+      }
+      const node0 = this.nodes.get(m.id);
+      if (node0) node0.container.visible = true;
       // line
       this.linesGfx.moveTo(ax, ay);
       this.linesGfx.lineTo(bx, by);

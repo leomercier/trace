@@ -56,6 +56,26 @@ export class Viewport {
     );
   }
 
+  /**
+   * Visible world AABB. `padding` extends the bounds by the given number
+   * of world units so we don't pop entities in/out exactly at the edge —
+   * useful for items whose chrome (handles, labels) extends slightly
+   * outside their core geometry.
+   */
+  getVisibleWorldBounds(padding = 0): Bounds {
+    const z = this.world.scale.x || 1;
+    const tlX = -this.world.position.x / z;
+    const tlY = -this.world.position.y / z;
+    const brX = (this.hostW - this.world.position.x) / z;
+    const brY = (this.hostH - this.world.position.y) / z;
+    return {
+      minX: Math.min(tlX, brX) - padding,
+      minY: Math.min(tlY, brY) - padding,
+      maxX: Math.max(tlX, brX) + padding,
+      maxY: Math.max(tlY, brY) + padding,
+    };
+  }
+
   fitTo(b: Bounds, padding = 60) {
     const w = b.maxX - b.minX;
     const h = b.maxY - b.minY;
