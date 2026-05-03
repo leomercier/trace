@@ -7,6 +7,7 @@ import { Toolbar } from "@/components/panels/Toolbar";
 import { Inspector } from "@/components/panels/Inspector";
 import { CalibrateDialog } from "@/components/panels/CalibrateDialog";
 import { useEditor, type Tool } from "@/stores/editorStore";
+import { useCursors } from "@/stores/cursorStore";
 import type {
   Frame,
   InventoryItem,
@@ -434,7 +435,7 @@ export function Editor({ initial }: { initial: InitialData }) {
       },
       onCursor: (c) => {
         if (c.userId === initial.user.id) return;
-        useEditor.getState().upsertCursor({
+        useCursors.getState().upsertCursor({
           userId: c.userId,
           name: c.name,
           color: c.color,

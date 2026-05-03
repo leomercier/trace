@@ -54,9 +54,6 @@ export interface EditorState {
   scale: { realPerUnit: number; unit: Unit } | null;
   bounds: Bounds | null;
 
-  // presence
-  cursors: Record<string, RemoteCursor>;
-
   // layers
   layers: {
     measurements: boolean;
@@ -127,8 +124,6 @@ export interface EditorState {
   ) => void;
   /** Replace drawing sortOrders in bulk (used by drag-and-drop reordering). */
   setDrawingOrder: (orderedIds: string[]) => void;
-  upsertCursor: (c: RemoteCursor) => void;
-  removeCursor: (userId: string) => void;
   toggleLayer: (k: keyof EditorState["layers"]) => void;
   toggleGrid: () => void;
   setGridSize: (mm: number) => void;
@@ -302,7 +297,6 @@ export const useEditor = create<EditorState>((set) => ({
   frames: {},
   scale: null,
   bounds: null,
-  cursors: {},
   layers: { measurements: true, notes: true, cursors: true, items: true, shapes: true, frames: true },
   grid: { visible: true, sizeMM: 1000 },
   aspectLockedItems: {},
@@ -447,13 +441,6 @@ export const useEditor = create<EditorState>((set) => ({
       });
       const { entities, bounds } = recomputeEntities(next);
       return { drawings: next, entities, bounds: bounds ?? s.bounds };
-    }),
-  upsertCursor: (c) =>
-    set((s) => ({ cursors: { ...s.cursors, [c.userId]: c } })),
-  removeCursor: (userId) =>
-    set((s) => {
-      const { [userId]: _, ...rest } = s.cursors;
-      return { cursors: rest };
     }),
   toggleLayer: (k) =>
     set((s) => ({ layers: { ...s.layers, [k]: !s.layers[k] } })),

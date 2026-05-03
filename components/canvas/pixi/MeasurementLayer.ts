@@ -6,13 +6,27 @@ import type { Unit } from "@/lib/utils/units";
 
 const MEASURE = 0xdc2626;
 const ENDPOINT_R_PX = 4;
-const TICK_PX = 8;
+
+interface LabelNode {
+  container: PIXI.Container;
+  text: PIXI.Text;
+  bg: PIXI.Graphics;
+  // Cached layout so we can skip the bg redraw when only position moved.
+  cachedLabel: string;
+  cachedW: number;
+  cachedH: number;
+}
 
 /**
  * Measurement lines + endpoint dots + label in red. Endpoints and labels are
  * counter-scaled so they stay constant size as the user zooms. The leader
  * line that ties an offset label back to its midpoint is drawn into its own
  * Graphics so we can stroke it dotted without affecting the solid main line.
+ *
+ * Label nodes are reused across renders (id-keyed Map). Allocating fresh
+ * `PIXI.Text` / `Graphics` per measurement per render generates GC pressure
+ * during drag-pan and selection changes; mutating cached nodes is much
+ * cheaper.
  */
 export class MeasurementLayer extends PIXI.Container {
   private linesGfx = new PIXI.Graphics();
@@ -20,6 +34,7 @@ export class MeasurementLayer extends PIXI.Container {
   private dotsGfx = new PIXI.Graphics();
   private labelLayer = new PIXI.Container();
   private draftGfx = new PIXI.Graphics();
+  private nodes = new Map<string, LabelNode>();
 
   constructor(private viewport: Viewport) {
     super();
@@ -47,10 +62,11 @@ export class MeasurementLayer extends PIXI.Container {
     this.linesGfx.clear();
     this.leadersGfx.clear();
     this.dotsGfx.clear();
-    this.labelLayer.removeChildren();
     this.labelRects = [];
+    const seen = new Set<string>();
 
     for (const m of measurements) {
+      seen.add(m.id);
       const ax = +m.ax,
         ay = +m.ay,
         bx = +m.bx,
@@ -97,28 +113,54 @@ export class MeasurementLayer extends PIXI.Container {
         }
       }
 
-      const txt = new PIXI.Text({
-        text: label,
-        style: {
-          fontFamily: "JetBrains Mono",
-          fontSize: 12,
-          fill: 0xffffff,
-          fontWeight: "500",
-        },
-      });
+      // Reuse the per-measurement label container so we're not allocating
+      // a fresh PIXI.Text + Graphics + Container on every render.
+      let node = this.nodes.get(m.id);
+      if (!node) {
+        const text = new PIXI.Text({
+          text: label,
+          style: {
+            fontFamily: "JetBrains Mono",
+            fontSize: 12,
+            fill: 0xffffff,
+            fontWeight: "500",
+          },
+        });
+        text.anchor.set(0.5, 0.5);
+        const bg = new PIXI.Graphics();
+        const container = new PIXI.Container();
+        container.addChild(bg);
+        container.addChild(text);
+        this.labelLayer.addChild(container);
+        node = {
+          container,
+          text,
+          bg,
+          cachedLabel: "",
+          cachedW: 0,
+          cachedH: 0,
+        };
+        this.nodes.set(m.id, node);
+      }
+      if (node.cachedLabel !== label) {
+        node.text.text = label;
+        node.cachedLabel = label;
+      }
       const padX = 6;
       const padY = 3;
-      const w = txt.width + padX * 2;
-      const h = txt.height + padY * 2;
-      const bg = new PIXI.Graphics();
-      bg.roundRect(-w / 2, -h / 2, w, h, 4).fill(MEASURE);
-      const cont = new PIXI.Container();
-      cont.addChild(bg);
-      txt.anchor.set(0.5, 0.5);
-      cont.addChild(txt);
-      cont.position.set(lx, ly);
-      cont.scale.set(1 / z, 1 / z);
-      this.labelLayer.addChild(cont);
+      const w = node.text.width + padX * 2;
+      const h = node.text.height + padY * 2;
+      // Only redraw the background when the size actually changed (label
+      // text changed or font metrics shifted). Position-only moves leave
+      // the bg geometry intact.
+      if (w !== node.cachedW || h !== node.cachedH) {
+        node.bg.clear();
+        node.bg.roundRect(-w / 2, -h / 2, w, h, 4).fill(MEASURE);
+        node.cachedW = w;
+        node.cachedH = h;
+      }
+      node.container.position.set(lx, ly);
+      node.container.scale.set(1 / z, 1 / z);
 
       // Record the label's hit rect in WORLD units (counter-scaled to match
       // the rendered pill). Used by Canvas.tsx for label-drag.
@@ -135,6 +177,14 @@ export class MeasurementLayer extends PIXI.Container {
         this.dotsGfx
           .circle(ax, ay, px(ENDPOINT_R_PX + 4))
           .circle(bx, by, px(ENDPOINT_R_PX + 4));
+      }
+    }
+
+    // Prune nodes whose measurement was removed.
+    for (const [id, node] of this.nodes) {
+      if (!seen.has(id)) {
+        node.container.destroy({ children: true });
+        this.nodes.delete(id);
       }
     }
 

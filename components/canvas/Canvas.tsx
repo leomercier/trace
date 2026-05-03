@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import * as PIXI from "pixi.js";
 import { useEditor } from "@/stores/editorStore";
+import { useCursors } from "@/stores/cursorStore";
 import { Viewport } from "./pixi/Viewport";
 import { DrawingLayer } from "./pixi/DrawingLayer";
 import { DrawingSelectionLayer, drawingTransform } from "./pixi/DrawingSelectionLayer";
@@ -13,6 +14,7 @@ import { PlacedItemsLayer } from "./pixi/PlacedItemsLayer";
 import { ShapesLayer } from "./pixi/ShapesLayer";
 import { FramesLayer } from "./pixi/FramesLayer";
 import { SnapIndex } from "./pixi/Snapping";
+import { PerfHud, isPerfHudEnabled, timeRender } from "./pixi/PerfHud";
 
 export interface CanvasHandle {
   fitToContent: () => void;
@@ -75,6 +77,7 @@ export function Canvas({
     cursorLayer: CursorLayer;
     snapBadge: PIXI.Graphics;
     snap: SnapIndex;
+    perfHud: PerfHud | null;
   } | null>(null);
 
   // Mount Pixi once
@@ -86,11 +89,21 @@ export function Canvas({
     const app = new PIXI.Application();
     (async () => {
       const rect = host.getBoundingClientRect();
+      // WebGPU is opt-in via `?renderer=webgpu` for now; defaults to WebGL
+      // so we don't ship an untested renderer to every user. Pixi falls
+      // back to WebGL automatically if WebGPU isn't supported.
+      const wantsWebGPU =
+        typeof window !== "undefined" &&
+        new URLSearchParams(window.location.search).get("renderer") === "webgpu";
       await app.init({
         width: Math.max(1, rect.width),
         height: Math.max(1, rect.height),
         background: "#ffffff",
         antialias: true,
+        // Hint the GPU driver to pick the discrete adapter on
+        // dual-GPU machines; harmless on integrated-only systems.
+        powerPreference: "high-performance",
+        ...(wantsWebGPU ? { preference: "webgpu" as const } : {}),
         resolution: Math.min(window.devicePixelRatio || 1, 2),
         autoDensity: true,
       });
@@ -127,6 +140,10 @@ export function Canvas({
       snapBadge.visible = false;
       app.stage.addChild(snapBadge);
 
+      // Dev-only perf HUD — only constructed when explicitly requested,
+      // so production users pay nothing for it.
+      const perfHud = isPerfHudEnabled() ? new PerfHud(app) : null;
+
       apiRef.current = {
         app,
         viewport,
@@ -140,6 +157,7 @@ export function Canvas({
         cursorLayer,
         snapBadge,
         snap: new SnapIndex(),
+        perfHud,
       };
 
       // Initial transform: center
@@ -197,7 +215,7 @@ export function Canvas({
       if (!a) return;
       if (state.grid !== prev.grid || state.scale !== prev.scale) renderGrid(state);
       if (state.entities !== prev.entities) {
-        a.drawingLayer.render(state.entities);
+        timeRender("drawings", () => a.drawingLayer.render(state.entities));
         a.snap.build(state.entities);
         const justLoaded =
           !hasFitOnce && (prev.entities?.length ?? 0) === 0 && state.entities.length > 0;
@@ -217,10 +235,12 @@ export function Canvas({
         state.scale !== prev.scale ||
         state.selection !== prev.selection
       ) {
-        a.measureLayer.render(
-          Object.values(state.measurements),
-          state.selection?.kind === "measurement" ? state.selection.id : null,
-          state.scale,
+        timeRender("measure", () =>
+          a.measureLayer.render(
+            Object.values(state.measurements),
+            state.selection?.kind === "measurement" ? state.selection.id : null,
+            state.scale,
+          ),
         );
       }
       if (
@@ -228,69 +248,96 @@ export function Canvas({
         state.scale !== prev.scale ||
         state.selection !== prev.selection
       ) {
-        a.placedLayer.render(
-          Object.values(state.placedItems),
-          state.selection?.kind === "placed" ? state.selection.id : null,
-          state.scale?.realPerUnit ?? null,
+        timeRender("placed", () =>
+          a.placedLayer.render(
+            Object.values(state.placedItems),
+            state.selection?.kind === "placed" ? state.selection.id : null,
+            state.scale?.realPerUnit ?? null,
+          ),
         );
       }
       if (state.shapes !== prev.shapes || state.selection !== prev.selection) {
-        a.shapesLayer.render(
-          Object.values(state.shapes),
-          state.selection?.kind === "shape" ? state.selection.id : null,
+        timeRender("shapes", () =>
+          a.shapesLayer.render(
+            Object.values(state.shapes),
+            state.selection?.kind === "shape" ? state.selection.id : null,
+          ),
         );
       }
       if (
         state.frames !== prev.frames ||
         state.selection !== prev.selection ||
-        state.layers.frames !== prev.layers.frames ||
-        state.view !== prev.view
+        state.layers.frames !== prev.layers.frames
       ) {
         a.framesLayer.visible = state.layers.frames;
-        a.framesLayer.render(
-          Object.values(state.frames),
-          state.selection?.kind === "frame" ? state.selection.id : null,
+        timeRender("frames", () =>
+          a.framesLayer.render(
+            Object.values(state.frames),
+            state.selection?.kind === "frame" ? state.selection.id : null,
+          ),
         );
       }
       if (
         state.drawings !== prev.drawings ||
         state.selection !== prev.selection
       ) {
-        a.drawingSelLayer.render(
-          state.selection?.kind === "drawing"
-            ? state.drawings[state.selection.id] || null
-            : null,
+        timeRender("drawSel", () =>
+          a.drawingSelLayer.render(
+            state.selection?.kind === "drawing"
+              ? state.drawings[state.selection.id] || null
+              : null,
+          ),
         );
       }
       if (state.draft !== prev.draft) {
         a.measureLayer.drawDraft(state.draft?.start || null, state.draft?.end || null);
       }
-      if (state.cursors !== prev.cursors) {
-        a.cursorLayer.render(Object.values(state.cursors));
-      }
       if (state.view !== prev.view) {
+        // Pan-only: the world container's transform already moved every
+        // child layer for free, so we only need to redraw the grid
+        // (which is viewport-culled and depends on visible bounds).
+        // Zoom-change: chrome layers use `px(n) = n/z` to size handles,
+        // dots, label pills and dashed outlines in screen pixels, so
+        // their world geometry has to change. Plain pan does not.
+        const zoomChanged = state.view.zoom !== prev.view.zoom;
         renderGrid(state);
-        a.measureLayer.render(
-          Object.values(state.measurements),
-          state.selection?.kind === "measurement" ? state.selection.id : null,
-          state.scale,
-        );
-        a.placedLayer.render(
-          Object.values(state.placedItems),
-          state.selection?.kind === "placed" ? state.selection.id : null,
-          state.scale?.realPerUnit ?? null,
-        );
-        a.shapesLayer.render(
-          Object.values(state.shapes),
-          state.selection?.kind === "shape" ? state.selection.id : null,
-        );
-        a.drawingSelLayer.render(
-          state.selection?.kind === "drawing"
-            ? state.drawings[state.selection.id] || null
-            : null,
-        );
-        a.measureLayer.drawDraft(state.draft?.start || null, state.draft?.end || null);
-        a.cursorLayer.render(Object.values(state.cursors));
+        if (zoomChanged) {
+          timeRender("measure", () =>
+            a.measureLayer.render(
+              Object.values(state.measurements),
+              state.selection?.kind === "measurement" ? state.selection.id : null,
+              state.scale,
+            ),
+          );
+          timeRender("placed", () =>
+            a.placedLayer.render(
+              Object.values(state.placedItems),
+              state.selection?.kind === "placed" ? state.selection.id : null,
+              state.scale?.realPerUnit ?? null,
+            ),
+          );
+          timeRender("shapes", () =>
+            a.shapesLayer.render(
+              Object.values(state.shapes),
+              state.selection?.kind === "shape" ? state.selection.id : null,
+            ),
+          );
+          timeRender("drawSel", () =>
+            a.drawingSelLayer.render(
+              state.selection?.kind === "drawing"
+                ? state.drawings[state.selection.id] || null
+                : null,
+            ),
+          );
+          timeRender("frames", () =>
+            a.framesLayer.render(
+              Object.values(state.frames),
+              state.selection?.kind === "frame" ? state.selection.id : null,
+            ),
+          );
+          a.measureLayer.drawDraft(state.draft?.start || null, state.draft?.end || null);
+          a.cursorLayer.render(Object.values(useCursors.getState().cursors));
+        }
       }
       if (state.draft !== prev.draft) {
         const d = state.draft;
@@ -306,9 +353,23 @@ export function Canvas({
         }
       }
     });
+    // Cursors live in their own store so high-frequency cursor traffic
+    // (~30 Hz broadcast) doesn't fan out to every editorStore subscriber.
+    const unsubCursors = useCursors.subscribe((state, prev) => {
+      const a = apiRef.current;
+      if (!a) return;
+      if (state.cursors !== prev.cursors) {
+        timeRender("cursors", () =>
+          a.cursorLayer.render(Object.values(state.cursors)),
+        );
+      }
+    });
     // initial render
     renderGrid(useEditor.getState());
-    return () => unsub();
+    return () => {
+      unsub();
+      unsubCursors();
+    };
   }, []);
 
   function pushView() {
