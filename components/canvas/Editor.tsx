@@ -409,26 +409,7 @@ export function Editor({ initial }: { initial: InitialData }) {
       pageId: initial.page.id,
       userId: initial.user.id,
       userName: initial.user.name,
-      onMeasurement: (m, kind) => {
-        const s = useEditor.getState();
-        if (kind === "DELETE") s.removeMeasurement(m.id);
-        else s.upsertMeasurement(m);
-      },
-      onNote: (n, kind) => {
-        const s = useEditor.getState();
-        if (kind === "DELETE") s.removeNote(n.id);
-        else s.upsertNote(n);
-      },
-      onPlacedItem: (p, kind) => {
-        const s = useEditor.getState();
-        if (kind === "DELETE") s.removePlacedItem(p.id);
-        else s.upsertPlacedItem(p);
-      },
-      onShape: (sh, kind) => {
-        const s = useEditor.getState();
-        if (kind === "DELETE") s.removeShape(sh.id);
-        else s.upsertShape(sh);
-      },
+      onBatch: (batch) => useEditor.getState().applyRealtimeBatch(batch),
       onPageUpdate: (p) => {
         const s = useEditor.getState();
         if (p.scale_real_per_unit) s.setScale(+p.scale_real_per_unit, (p.scale_unit || "mm") as any);

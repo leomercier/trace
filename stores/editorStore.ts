@@ -124,10 +124,24 @@ export interface EditorState {
   ) => void;
   /** Replace drawing sortOrders in bulk (used by drag-and-drop reordering). */
   setDrawingOrder: (orderedIds: string[]) => void;
+  /**
+   * Apply a coalesced batch of realtime postgres-changes events in one
+   * `set()` so 50 incoming rows in a burst (e.g. another user pasting
+   * inventory) collapse into a single React render rather than 50.
+   * Per-row, last-event-wins.
+   */
+  applyRealtimeBatch: (batch: RealtimeBatch) => void;
   toggleLayer: (k: keyof EditorState["layers"]) => void;
   toggleGrid: () => void;
   setGridSize: (mm: number) => void;
   toggleAspectLock: (id: string) => void;
+}
+
+export interface RealtimeBatch {
+  measurements?: { upserts?: Measurement[]; deletes?: string[] };
+  notes?: { upserts?: Note[]; deletes?: string[] };
+  placedItems?: { upserts?: PlacedItem[]; deletes?: string[] };
+  shapes?: { upserts?: Shape[]; deletes?: string[] };
 }
 
 export type ParsedEntity =
@@ -486,6 +500,35 @@ export const useEditor = create<EditorState>((set) => ({
       });
       const { entities, bounds } = recomputeEntities(next);
       return { drawings: next, entities, bounds: bounds ?? s.bounds };
+    }),
+  applyRealtimeBatch: (batch) =>
+    set((s) => {
+      const next: Partial<EditorState> = {};
+      if (batch.measurements) {
+        const m = { ...s.measurements };
+        for (const row of batch.measurements.upserts ?? []) m[row.id] = row;
+        for (const id of batch.measurements.deletes ?? []) delete m[id];
+        next.measurements = m;
+      }
+      if (batch.notes) {
+        const m = { ...s.notes };
+        for (const row of batch.notes.upserts ?? []) m[row.id] = row;
+        for (const id of batch.notes.deletes ?? []) delete m[id];
+        next.notes = m;
+      }
+      if (batch.placedItems) {
+        const m = { ...s.placedItems };
+        for (const row of batch.placedItems.upserts ?? []) m[row.id] = row;
+        for (const id of batch.placedItems.deletes ?? []) delete m[id];
+        next.placedItems = m;
+      }
+      if (batch.shapes) {
+        const m = { ...s.shapes };
+        for (const row of batch.shapes.upserts ?? []) m[row.id] = row;
+        for (const id of batch.shapes.deletes ?? []) delete m[id];
+        next.shapes = m;
+      }
+      return next;
     }),
   toggleLayer: (k) =>
     set((s) => ({ layers: { ...s.layers, [k]: !s.layers[k] } })),
