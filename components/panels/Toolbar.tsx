@@ -154,7 +154,11 @@ export function Toolbar({
 
         {/* Overflow menu — attachments, fit, export, etc. */}
         <div className="relative">
-          <Tooltip label="More tools" hint="Calibrate, files, fit-to-content, export.">
+          <Tooltip
+            label="More tools"
+            hint="Calibrate, files, fit-to-content, export."
+            disabled={moreOpen}
+          >
           <button
             onClick={() => setMoreOpen((v) => !v)}
             aria-label="More tools"
@@ -264,13 +268,18 @@ function Tooltip({
   label,
   hint,
   keyHint,
+  disabled,
   children,
 }: {
   label: string;
   hint?: string;
   keyHint?: string;
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
+  if (disabled) {
+    return <span className="relative inline-flex">{children}</span>;
+  }
   return (
     <span className="group relative inline-flex">
       {children}

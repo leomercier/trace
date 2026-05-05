@@ -47,13 +47,14 @@ export function NotesOverlay({
   const view = useEditor((s) => s.view);
   const notes = useEditor((s) => s.notes);
   const layers = useEditor((s) => s.layers);
+  const hiddenIds = useEditor((s) => s.hiddenIds);
   const selection = useEditor((s) => s.selection);
   const setSelection = useEditor((s) => s.setSelection);
   if (!layers.notes) return null;
 
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
-      {Object.values(notes).map((n) => (
+      {Object.values(notes).filter((n) => !hiddenIds[n.id]).map((n) => (
         <StickyNote
           key={n.id}
           n={n}
