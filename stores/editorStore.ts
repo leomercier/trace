@@ -74,6 +74,12 @@ export interface EditorState {
   // canvas handles preserves W:D; Shift+drag inverts the lock for that drag.
   aspectLockedItems: Record<string, true>;
 
+  // Per-item hide flag (UI-only). Keyed by the row id (works for frames,
+  // placed items, shapes, notes — drawings have their own `visible` flag).
+  // Used by the unified Layers panel so each row can be toggled
+  // independently of the per-category visibility on the Inspector.
+  hiddenIds: Record<string, true>;
+
   // drawing entities (parsed from source file). Live in memory only.
   entities: ParsedEntity[];
   entitiesLoaded: boolean;
@@ -133,6 +139,8 @@ export interface EditorState {
   toggleGrid: () => void;
   setGridSize: (mm: number) => void;
   toggleAspectLock: (id: string) => void;
+  toggleHidden: (id: string) => void;
+  setHidden: (id: string, hidden: boolean) => void;
 }
 
 export type ParsedEntity =
@@ -306,6 +314,7 @@ export const useEditor = create<EditorState>((set) => ({
   layers: { measurements: true, notes: true, cursors: true, items: true, shapes: true, frames: true },
   grid: { visible: true, sizeMM: 1000 },
   aspectLockedItems: {},
+  hiddenIds: {},
   entities: [],
   entitiesLoaded: false,
   drawings: {},
@@ -469,5 +478,19 @@ export const useEditor = create<EditorState>((set) => ({
       if (cur[id]) delete cur[id];
       else cur[id] = true;
       return { aspectLockedItems: cur };
+    }),
+  toggleHidden: (id) =>
+    set((s) => {
+      const cur = { ...s.hiddenIds };
+      if (cur[id]) delete cur[id];
+      else cur[id] = true;
+      return { hiddenIds: cur };
+    }),
+  setHidden: (id, hidden) =>
+    set((s) => {
+      const cur = { ...s.hiddenIds };
+      if (hidden) cur[id] = true;
+      else delete cur[id];
+      return { hiddenIds: cur };
     }),
 }));

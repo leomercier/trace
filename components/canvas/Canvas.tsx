@@ -226,17 +226,22 @@ export function Canvas({
       if (
         state.placedItems !== prev.placedItems ||
         state.scale !== prev.scale ||
-        state.selection !== prev.selection
+        state.selection !== prev.selection ||
+        state.hiddenIds !== prev.hiddenIds
       ) {
         a.placedLayer.render(
-          Object.values(state.placedItems),
+          Object.values(state.placedItems).filter((p) => !state.hiddenIds[p.id]),
           state.selection?.kind === "placed" ? state.selection.id : null,
           state.scale?.realPerUnit ?? null,
         );
       }
-      if (state.shapes !== prev.shapes || state.selection !== prev.selection) {
+      if (
+        state.shapes !== prev.shapes ||
+        state.selection !== prev.selection ||
+        state.hiddenIds !== prev.hiddenIds
+      ) {
         a.shapesLayer.render(
-          Object.values(state.shapes),
+          Object.values(state.shapes).filter((s) => !state.hiddenIds[s.id]),
           state.selection?.kind === "shape" ? state.selection.id : null,
         );
       }
@@ -244,11 +249,12 @@ export function Canvas({
         state.frames !== prev.frames ||
         state.selection !== prev.selection ||
         state.layers.frames !== prev.layers.frames ||
-        state.view !== prev.view
+        state.view !== prev.view ||
+        state.hiddenIds !== prev.hiddenIds
       ) {
         a.framesLayer.visible = state.layers.frames;
         a.framesLayer.render(
-          Object.values(state.frames),
+          Object.values(state.frames).filter((f) => !state.hiddenIds[f.id]),
           state.selection?.kind === "frame" ? state.selection.id : null,
         );
       }
@@ -276,12 +282,12 @@ export function Canvas({
           state.scale,
         );
         a.placedLayer.render(
-          Object.values(state.placedItems),
+          Object.values(state.placedItems).filter((p) => !state.hiddenIds[p.id]),
           state.selection?.kind === "placed" ? state.selection.id : null,
           state.scale?.realPerUnit ?? null,
         );
         a.shapesLayer.render(
-          Object.values(state.shapes),
+          Object.values(state.shapes).filter((s) => !state.hiddenIds[s.id]),
           state.selection?.kind === "shape" ? state.selection.id : null,
         );
         a.drawingSelLayer.render(
@@ -475,7 +481,9 @@ export function Canvas({
       if (!isPan && tool === "select" && e.button === 0) {
         const state = useEditor.getState();
         const world = a!.viewport.screenToWorld(sx, sy);
-        const items = Object.values(state.placedItems);
+        const items = Object.values(state.placedItems).filter(
+          (p) => !state.hiddenIds[p.id],
+        );
         const realPerUnit = state.scale?.realPerUnit ?? null;
 
         // Measurement label drag (highest priority — labels render on top).
@@ -918,7 +926,9 @@ export function Canvas({
       const tool = useEditor.getState().tool;
       if (tool === "select") {
         const state = useEditor.getState();
-        const items = Object.values(state.placedItems);
+        const items = Object.values(state.placedItems).filter(
+          (p) => !state.hiddenIds[p.id],
+        );
         const realPerUnit = state.scale?.realPerUnit ?? null;
         const itemHit = a!.placedLayer.hitTest(items, world.x, world.y, realPerUnit);
         if (itemHit) {
@@ -926,7 +936,7 @@ export function Canvas({
           return;
         }
         const shapeHit = a!.shapesLayer.hitTest(
-          Object.values(state.shapes),
+          Object.values(state.shapes).filter((s) => !state.hiddenIds[s.id]),
           world.x,
           world.y,
         );
