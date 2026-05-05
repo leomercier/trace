@@ -1,6 +1,6 @@
 import type { ParseResult } from ".";
 import { convertDwgToDxf } from "@/lib/utils/dwg";
-import { parseDxf } from "./dxf";
+import { parseDxfAsync } from "./dxf-async";
 
 export async function parseDwg(file: Blob): Promise<ParseResult> {
   const dxf = await convertDwgToDxf(file);
@@ -9,5 +9,8 @@ export async function parseDwg(file: Blob): Promise<ParseResult> {
       "Could not convert this DWG. Try saving it as DXF in your CAD application.",
     );
   }
-  return parseDxf(dxf);
+  // DWG conversion still happens on the main thread (libredwg-web's
+  // blob-script bootstrap is fragile inside a worker); the DXF parse
+  // afterwards goes off-thread.
+  return parseDxfAsync(dxf);
 }

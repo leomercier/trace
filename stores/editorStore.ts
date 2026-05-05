@@ -54,9 +54,6 @@ export interface EditorState {
   scale: { realPerUnit: number; unit: Unit } | null;
   bounds: Bounds | null;
 
-  // presence
-  cursors: Record<string, RemoteCursor>;
-
   // layers
   layers: {
     measurements: boolean;
@@ -127,12 +124,24 @@ export interface EditorState {
   ) => void;
   /** Replace drawing sortOrders in bulk (used by drag-and-drop reordering). */
   setDrawingOrder: (orderedIds: string[]) => void;
-  upsertCursor: (c: RemoteCursor) => void;
-  removeCursor: (userId: string) => void;
+  /**
+   * Apply a coalesced batch of realtime postgres-changes events in one
+   * `set()` so 50 incoming rows in a burst (e.g. another user pasting
+   * inventory) collapse into a single React render rather than 50.
+   * Per-row, last-event-wins.
+   */
+  applyRealtimeBatch: (batch: RealtimeBatch) => void;
   toggleLayer: (k: keyof EditorState["layers"]) => void;
   toggleGrid: () => void;
   setGridSize: (mm: number) => void;
   toggleAspectLock: (id: string) => void;
+}
+
+export interface RealtimeBatch {
+  measurements?: { upserts?: Measurement[]; deletes?: string[] };
+  notes?: { upserts?: Note[]; deletes?: string[] };
+  placedItems?: { upserts?: PlacedItem[]; deletes?: string[] };
+  shapes?: { upserts?: Shape[]; deletes?: string[] };
 }
 
 export type ParsedEntity =
@@ -239,51 +248,96 @@ function recomputeEntities(drawings: Record<string, Drawing>): {
     maxY = -Infinity;
   for (const d of ordered) {
     if (!d.visible) continue;
-    const isIdentity =
-      d.tx === 0 && d.ty === 0 && d.scale === 1 && d.rotation === 0;
-    if (isIdentity) {
-      entities.push(...d.entities);
-      if (d.bounds) {
-        if (d.bounds.minX < minX) minX = d.bounds.minX;
-        if (d.bounds.minY < minY) minY = d.bounds.minY;
-        if (d.bounds.maxX > maxX) maxX = d.bounds.maxX;
-        if (d.bounds.maxY > maxY) maxY = d.bounds.maxY;
-      }
-    } else {
-      // Apply per-drawing transform to each entity. For very large
-      // drawings this is the moment we pay; subsequent renders just
-      // walk the cached, already-transformed array.
-      for (const e of d.entities) entities.push(transformEntity(e, d));
-      if (d.bounds) {
-        // Conservative bounds: transform the four corners with the same
-        // centre-pivoting convention as transformEntity().
-        const cx = (d.bounds.minX + d.bounds.maxX) / 2;
-        const cy = (d.bounds.minY + d.bounds.maxY) / 2;
-        const r = (d.rotation * Math.PI) / 180;
-        const cos = Math.cos(r);
-        const sin = Math.sin(r);
-        const corners = [
-          { x: d.bounds.minX, y: d.bounds.minY },
-          { x: d.bounds.maxX, y: d.bounds.minY },
-          { x: d.bounds.minX, y: d.bounds.maxY },
-          { x: d.bounds.maxX, y: d.bounds.maxY },
-        ];
-        for (const c of corners) {
-          const lx = (c.x - cx) * d.scale;
-          const ly = (c.y - cy) * d.scale;
-          const wx = lx * cos - ly * sin + cx + d.tx;
-          const wy = lx * sin + ly * cos + cy + d.ty;
-          if (wx < minX) minX = wx;
-          if (wy < minY) minY = wy;
-          if (wx > maxX) maxX = wx;
-          if (wy > maxY) maxY = wy;
-        }
-      }
+    // Hit the cache by reference equality on the entities array (caught
+    // when a drawing's source is replaced) plus a string key for the
+    // transform values. Cache survives across set() spreads because the
+    // map lives at module scope.
+    const transformKey = `${d.tx}|${d.ty}|${d.scale}|${d.rotation}`;
+    let entry = drawingCache.get(d.id);
+    if (
+      !entry ||
+      entry.entitiesRef !== d.entities ||
+      entry.transformKey !== transformKey
+    ) {
+      entry = computeDrawingCache(d, transformKey);
+      drawingCache.set(d.id, entry);
     }
+    for (const e of entry.entities) entities.push(e);
+    if (entry.bounds) {
+      if (entry.bounds.minX < minX) minX = entry.bounds.minX;
+      if (entry.bounds.minY < minY) minY = entry.bounds.minY;
+      if (entry.bounds.maxX > maxX) maxX = entry.bounds.maxX;
+      if (entry.bounds.maxY > maxY) maxY = entry.bounds.maxY;
+    }
+  }
+  // Prune cache for removed drawings so it doesn't grow unbounded across
+  // page navigations.
+  for (const id of drawingCache.keys()) {
+    if (!drawings[id]) drawingCache.delete(id);
   }
   const bounds =
     minX !== Infinity ? { minX, minY, maxX, maxY } : null;
   return { entities, bounds };
+}
+
+interface DrawingCacheEntry {
+  entitiesRef: ParsedEntity[];
+  transformKey: string;
+  entities: ParsedEntity[];
+  bounds: Bounds | null;
+}
+
+const drawingCache = new Map<string, DrawingCacheEntry>();
+
+function computeDrawingCache(d: Drawing, transformKey: string): DrawingCacheEntry {
+  const isIdentity =
+    d.tx === 0 && d.ty === 0 && d.scale === 1 && d.rotation === 0;
+  let transformed: ParsedEntity[];
+  let bounds: Bounds | null = null;
+  if (isIdentity) {
+    // Identity transform — no per-entity work, just reuse the array.
+    transformed = d.entities;
+    bounds = d.bounds ?? null;
+  } else {
+    transformed = new Array(d.entities.length);
+    for (let i = 0; i < d.entities.length; i++) {
+      transformed[i] = transformEntity(d.entities[i], d);
+    }
+    if (d.bounds) {
+      const cx = (d.bounds.minX + d.bounds.maxX) / 2;
+      const cy = (d.bounds.minY + d.bounds.maxY) / 2;
+      const r = (d.rotation * Math.PI) / 180;
+      const cos = Math.cos(r);
+      const sin = Math.sin(r);
+      let mnX = Infinity,
+        mnY = Infinity,
+        mxX = -Infinity,
+        mxY = -Infinity;
+      const corners = [
+        { x: d.bounds.minX, y: d.bounds.minY },
+        { x: d.bounds.maxX, y: d.bounds.minY },
+        { x: d.bounds.minX, y: d.bounds.maxY },
+        { x: d.bounds.maxX, y: d.bounds.maxY },
+      ];
+      for (const c of corners) {
+        const lx = (c.x - cx) * d.scale;
+        const ly = (c.y - cy) * d.scale;
+        const wx = lx * cos - ly * sin + cx + d.tx;
+        const wy = lx * sin + ly * cos + cy + d.ty;
+        if (wx < mnX) mnX = wx;
+        if (wy < mnY) mnY = wy;
+        if (wx > mxX) mxX = wx;
+        if (wy > mxY) mxY = wy;
+      }
+      bounds = { minX: mnX, minY: mnY, maxX: mxX, maxY: mxY };
+    }
+  }
+  return {
+    entitiesRef: d.entities,
+    transformKey,
+    entities: transformed,
+    bounds,
+  };
 }
 
 export const useEditor = create<EditorState>((set) => ({
@@ -302,7 +356,6 @@ export const useEditor = create<EditorState>((set) => ({
   frames: {},
   scale: null,
   bounds: null,
-  cursors: {},
   layers: { measurements: true, notes: true, cursors: true, items: true, shapes: true, frames: true },
   grid: { visible: true, sizeMM: 1000 },
   aspectLockedItems: {},
@@ -448,12 +501,34 @@ export const useEditor = create<EditorState>((set) => ({
       const { entities, bounds } = recomputeEntities(next);
       return { drawings: next, entities, bounds: bounds ?? s.bounds };
     }),
-  upsertCursor: (c) =>
-    set((s) => ({ cursors: { ...s.cursors, [c.userId]: c } })),
-  removeCursor: (userId) =>
+  applyRealtimeBatch: (batch) =>
     set((s) => {
-      const { [userId]: _, ...rest } = s.cursors;
-      return { cursors: rest };
+      const next: Partial<EditorState> = {};
+      if (batch.measurements) {
+        const m = { ...s.measurements };
+        for (const row of batch.measurements.upserts ?? []) m[row.id] = row;
+        for (const id of batch.measurements.deletes ?? []) delete m[id];
+        next.measurements = m;
+      }
+      if (batch.notes) {
+        const m = { ...s.notes };
+        for (const row of batch.notes.upserts ?? []) m[row.id] = row;
+        for (const id of batch.notes.deletes ?? []) delete m[id];
+        next.notes = m;
+      }
+      if (batch.placedItems) {
+        const m = { ...s.placedItems };
+        for (const row of batch.placedItems.upserts ?? []) m[row.id] = row;
+        for (const id of batch.placedItems.deletes ?? []) delete m[id];
+        next.placedItems = m;
+      }
+      if (batch.shapes) {
+        const m = { ...s.shapes };
+        for (const row of batch.shapes.upserts ?? []) m[row.id] = row;
+        for (const id of batch.shapes.deletes ?? []) delete m[id];
+        next.shapes = m;
+      }
+      return next;
     }),
   toggleLayer: (k) =>
     set((s) => ({ layers: { ...s.layers, [k]: !s.layers[k] } })),

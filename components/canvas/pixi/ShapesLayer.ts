@@ -34,6 +34,7 @@ export class ShapesLayer extends PIXI.Container {
   render(shapes: Shape[], selectionId: string | null) {
     const z = this.viewport.zoom || 1;
     const px = (n: number) => n / z;
+    const vis = this.viewport.getVisibleWorldBounds(px(8));
     this.gfx.clear();
 
     // Track which texts are still alive so we can remove stale ones.
@@ -46,6 +47,30 @@ export class ShapesLayer extends PIXI.Container {
 
     for (const s of sorted) {
       seen.add(s.id);
+      // AABB cull. Lines store endpoints as (x,y) and (x+w, y+h) — that
+      // formula already gives the correct AABB even for negative w/h.
+      const sx = Number(s.x);
+      const sy = Number(s.y);
+      const ex = sx + Number(s.w);
+      const ey = sy + Number(s.h);
+      const aabbMinX = Math.min(sx, ex);
+      const aabbMinY = Math.min(sy, ey);
+      const aabbMaxX = Math.max(sx, ex);
+      const aabbMaxY = Math.max(sy, ey);
+      if (
+        aabbMaxX < vis.minX ||
+        aabbMinX > vis.maxX ||
+        aabbMaxY < vis.minY ||
+        aabbMinY > vis.maxY
+      ) {
+        // Hide existing text node (rect/line draw goes through gfx so
+        // skipping the loop body is enough).
+        const t = this.texts.get(s.id);
+        if (t) t.visible = false;
+        continue;
+      }
+      const t0 = this.texts.get(s.id);
+      if (t0) t0.visible = true;
       const stroke = hexToNum(s.stroke, 0x1c1917);
       const fill = s.fill ? hexToNum(s.fill, 0xffffff) : null;
       const sw = Math.max(0.5, Number(s.stroke_width ?? 2));

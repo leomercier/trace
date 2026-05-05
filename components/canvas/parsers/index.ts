@@ -59,8 +59,8 @@ export async function parseFile(
       return m.parsePdf(file);
     }
     case "dxf": {
-      const m = await import("./dxf");
-      return m.parseDxf(file);
+      const m = await import("./dxf-async");
+      return m.parseDxfAsync(file);
     }
     case "dwg": {
       const m = await import("./dwg");

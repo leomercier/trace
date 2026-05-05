@@ -7,6 +7,7 @@ import { Toolbar } from "@/components/panels/Toolbar";
 import { Inspector } from "@/components/panels/Inspector";
 import { CalibrateDialog } from "@/components/panels/CalibrateDialog";
 import { useEditor, type Tool } from "@/stores/editorStore";
+import { useCursors } from "@/stores/cursorStore";
 import type {
   Frame,
   InventoryItem,
@@ -18,6 +19,7 @@ import type {
   Shape,
 } from "@/lib/supabase/types";
 import { createClient } from "@/lib/supabase/client";
+import { createPerIdThrottle } from "@/lib/utils/throttle";
 import { parseFile, inferFileType } from "./parsers";
 import { Button } from "@/components/ui/Button";
 import { Upload } from "lucide-react";
@@ -407,26 +409,7 @@ export function Editor({ initial }: { initial: InitialData }) {
       pageId: initial.page.id,
       userId: initial.user.id,
       userName: initial.user.name,
-      onMeasurement: (m, kind) => {
-        const s = useEditor.getState();
-        if (kind === "DELETE") s.removeMeasurement(m.id);
-        else s.upsertMeasurement(m);
-      },
-      onNote: (n, kind) => {
-        const s = useEditor.getState();
-        if (kind === "DELETE") s.removeNote(n.id);
-        else s.upsertNote(n);
-      },
-      onPlacedItem: (p, kind) => {
-        const s = useEditor.getState();
-        if (kind === "DELETE") s.removePlacedItem(p.id);
-        else s.upsertPlacedItem(p);
-      },
-      onShape: (sh, kind) => {
-        const s = useEditor.getState();
-        if (kind === "DELETE") s.removeShape(sh.id);
-        else s.upsertShape(sh);
-      },
+      onBatch: (batch) => useEditor.getState().applyRealtimeBatch(batch),
       onPageUpdate: (p) => {
         const s = useEditor.getState();
         if (p.scale_real_per_unit) s.setScale(+p.scale_real_per_unit, (p.scale_unit || "mm") as any);
@@ -434,7 +417,7 @@ export function Editor({ initial }: { initial: InitialData }) {
       },
       onCursor: (c) => {
         if (c.userId === initial.user.id) return;
-        useEditor.getState().upsertCursor({
+        useCursors.getState().upsertCursor({
           userId: c.userId,
           name: c.name,
           color: c.color,
@@ -884,20 +867,32 @@ export function Editor({ initial }: { initial: InitialData }) {
     await supabase.from("notes").delete().eq("id", id);
   }
 
-  async function updateNote(n: Note) {
+  // Throttle DB writes during high-frequency drags. The store update is
+  // immediate (drives the optimistic on-canvas movement); only the
+  // network round-trip is bounded — at most one write per 120 ms per
+  // note, with a trailing-edge flush so the final position always lands.
+  const noteWriteThrottleRef = useRef<ReturnType<typeof createPerIdThrottle<Note>> | null>(null);
+  if (!noteWriteThrottleRef.current) {
+    noteWriteThrottleRef.current = createPerIdThrottle<Note>(120, async (n) => {
+      if (n.id.startsWith("tmp-")) return;
+      await supabase
+        .from("notes")
+        .update({
+          x: n.x,
+          y: n.y,
+          w: n.w,
+          h: n.h,
+          text: n.text,
+          color: n.color,
+          style: n.style,
+        })
+        .eq("id", n.id);
+    });
+  }
+
+  function updateNote(n: Note) {
     useEditor.getState().upsertNote(n);
-    await supabase
-      .from("notes")
-      .update({
-        x: n.x,
-        y: n.y,
-        w: n.w,
-        h: n.h,
-        text: n.text,
-        color: n.color,
-        style: n.style,
-      })
-      .eq("id", n.id);
+    noteWriteThrottleRef.current!.schedule(n);
   }
 
   async function applyCalibration(real: number, unit: any) {

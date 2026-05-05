@@ -68,6 +68,9 @@ export class FramesLayer extends PIXI.Container {
         new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     );
 
+    // 32-px padding so the name label / handle chrome that extends just
+    // past the frame's natural rect doesn't pop in/out at the edge.
+    const vis = this.viewport.getVisibleWorldBounds(px(32));
     const seen = new Set<string>();
     for (const f of sorted) {
       seen.add(f.id);
@@ -75,6 +78,18 @@ export class FramesLayer extends PIXI.Container {
       const y = Number(f.y);
       const w = Number(f.w);
       const h = Number(f.h);
+      if (
+        x + w < vis.minX ||
+        x > vis.maxX ||
+        y + h < vis.minY ||
+        y > vis.maxY
+      ) {
+        const t = this.texts.get(f.id);
+        if (t) t.visible = false;
+        continue;
+      }
+      const t0 = this.texts.get(f.id);
+      if (t0) t0.visible = true;
       const bg = hexToNum(f.background, 0xffffff);
 
       // Background fill — slightly darker outline so the frame is visible
